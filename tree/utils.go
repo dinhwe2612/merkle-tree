@@ -14,3 +14,8 @@ func HashConcat(a, b string) string {
 	h := sha256.Sum256([]byte(a + b))
 	return hex.EncodeToString(h[:])
 }
+
+type ProofStep struct {
+	key    string
+	isLeft bool
+}

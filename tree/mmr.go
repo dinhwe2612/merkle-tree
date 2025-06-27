@@ -3,6 +3,7 @@ package tree
 import (
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,11 +57,12 @@ func (mmr *MMR) AddLeaf(data string) {
 }
 
 func (mmr *MMR) Root() string {
-	root := ""
+	var root strings.Builder
+	root.WriteString(strconv.Itoa(len(mmr.peaks)))
 	for _, peak := range mmr.peaks {
-		root += peak.hash
+		root.WriteString(peak.hash)
 	}
-	return Hash(root)
+	return Hash(root.String())
 }
 
 func (mmr *MMR) peakIndexOfLeafByValue(leaf string) int {
@@ -79,74 +81,60 @@ func (mmr *MMR) peakIndexOfLeafByValue(leaf string) int {
 	return -1
 }
 
-type PeakProofStep struct {
-	hash   string
-	isLeft bool
-}
-
-type OtherPeakProofStep struct {
-	hash      string
-	peakIndex int
-}
-
-func (mmr *MMR) GetProofByValue(leaf string) ([]PeakProofStep, []OtherPeakProofStep) {
+func (mmr *MMR) GetProofByValue(leaf string) ([]ProofStep, string, string) {
 	idx, ok := mmr.leafIndex[leaf]
 	if !ok {
-		return nil, nil
+		return nil, "", ""
 	}
 	peakIdx := mmr.peakIndexOfLeafByValue(leaf)
 	if peakIdx == -1 {
-		return nil, nil
+		return nil, "", ""
 	}
-	var peakPath []PeakProofStep
+	var peakPath []ProofStep
 	node := mmr.leafs[idx]
 	for node.parent != nil {
 		if node.parent.left == node {
-			peakPath = append(peakPath, PeakProofStep{hash: node.parent.right.hash, isLeft: false})
+			peakPath = append(peakPath, ProofStep{key: node.parent.right.hash, isLeft: false})
 		} else {
-			peakPath = append(peakPath, PeakProofStep{hash: node.parent.left.hash, isLeft: true})
+			peakPath = append(peakPath, ProofStep{key: node.parent.left.hash, isLeft: true})
 		}
 		node = node.parent
 	}
-	var otherPeaks []OtherPeakProofStep
+	var leftHash, rightHash strings.Builder
+	leftHash.WriteString(strconv.Itoa(len(mmr.peaks)))
 	for i, peak := range mmr.peaks {
-		if i != peakIdx {
-			otherPeaks = append(otherPeaks, OtherPeakProofStep{hash: peak.hash, peakIndex: i})
+		if i < peakIdx {
+			leftHash.WriteString(peak.hash)
+		} else if i > peakIdx {
+			rightHash.WriteString(peak.hash)
 		}
 	}
-	return peakPath, otherPeaks
+	return peakPath, leftHash.String(), rightHash.String()
 }
 
-func VerifyProof(leaf string, root string, peakPath []PeakProofStep, otherPeaks []OtherPeakProofStep, leafPeakIndex int, totalPeaks int) bool {
+func VerifyProof(leaf string, root string, peakPath []ProofStep, leftPeaks, rightPeaks string) bool {
 	h := Hash(leaf)
-	peaks := make([]string, totalPeaks)
-	peaks[leafPeakIndex] = h
 	for _, step := range peakPath {
 		if step.isLeft {
-			h = Hash(step.hash + h)
+			h = Hash(step.key + h)
 		} else {
-			h = Hash(h + step.hash)
+			h = Hash(h + step.key)
 		}
 	}
-	peaks[leafPeakIndex] = h
-	for _, step := range otherPeaks {
-		peaks[step.peakIndex] = step.hash
-	}
-	var rootBuilder strings.Builder
-	for _, p := range peaks {
-		rootBuilder.WriteString(p)
-	}
-	rootCalc := Hash(rootBuilder.String())
+	rootCalc := Hash(leftPeaks + h + rightPeaks)
 	return rootCalc == root
 }
 
 func StressTestMMR(numLeaves int, numQueries int) {
 	fmt.Printf("\n--- STRESS TEST: Fixed Merkle Tree with %d leaves, %d queries ---\n", numLeaves, numQueries)
+
 	mmr := &MMR{}
+
 	leaves := make([]string, numLeaves)
 	for i := 0; i < numLeaves; i++ {
 		leaves[i] = fmt.Sprintf("leaf_%d", i)
 	}
+
 	startAdd := time.Now()
 	for _, v := range leaves {
 		mmr.AddLeaf(v)
@@ -161,12 +149,10 @@ func StressTestMMR(numLeaves int, numQueries int) {
 	for t := 0; t < numQueries; t++ {
 		leaf := leaves[rnd.Intn(numLeaves)]
 		startProof := time.Now()
-		peakPath, otherPeaks := mmr.GetProofByValue(leaf)
-		peakIdx := mmr.peakIndexOfLeafByValue(leaf)
-		totalPeaks := len(mmr.peaks)
+		peakPath, leftPeaks, rightPeaks := mmr.GetProofByValue(leaf)
 		proofTime := time.Since(startProof)
 		startVerify := time.Now()
-		ok := VerifyProof(leaf, mmr.Root(), peakPath, otherPeaks, peakIdx, totalPeaks)
+		ok := VerifyProof(leaf, mmr.Root(), peakPath, leftPeaks, rightPeaks)
 		verifyTime := time.Since(startVerify)
 		totalProof += proofTime
 		totalVerify += verifyTime
@@ -176,6 +162,7 @@ func StressTestMMR(numLeaves int, numQueries int) {
 		}
 		okCount++
 	}
+
 	fmt.Printf("%d queries: total proof time %v (average %.3f µs), total verification time %v (average %.3f µs), correct: %d/%d\n",
 		numQueries, totalProof, float64(totalProof.Microseconds())/float64(numQueries),
 		totalVerify, float64(totalVerify.Microseconds())/float64(numQueries), okCount, numQueries)
