@@ -35,15 +35,17 @@ func (tree *MerkleTree) AddLeaf(leaf string) {
 	tree.Update(leaf, tree.leafs[leaf], 1, 1, tree.maxLeafs)
 }
 
-func (tree *MerkleTree) Build(p, b, e int) {
-	if b == e {
-		tree.merkleTree[p] = Hash("#")
+func (tree *MerkleTree) Build(nodeID, begin, end int) {
+	if begin == end {
+		tree.merkleTree[nodeID] = Hash("#")
 		return
 	}
-	mid := (b + e) >> 1
-	tree.Build(p<<1, b, mid)
-	tree.Build(p<<1|1, mid+1, e)
-	tree.merkleTree[p] = HashConcat(tree.merkleTree[p<<1], tree.merkleTree[p<<1|1])
+	mid := (begin + end) >> 1
+	leftChild := nodeID << 1
+	rightChild := nodeID<<1 | 1
+	tree.Build(leftChild, begin, mid)
+	tree.Build(rightChild, mid+1, end)
+	tree.merkleTree[nodeID] = HashConcat(tree.merkleTree[leftChild], tree.merkleTree[rightChild])
 }
 
 func (tree *MerkleTree) Update(leaf string, pos int, nodeID, begin, end int) {
@@ -55,13 +57,13 @@ func (tree *MerkleTree) Update(leaf string, pos int, nodeID, begin, end int) {
 		return
 	}
 	mid := (begin + end) >> 1
-	if pos <= mid {
-		tree.Update(leaf, pos, nodeID<<1, begin, mid)
-	} else {
-		tree.Update(leaf, pos, nodeID<<1|1, mid+1, end)
-	}
 	leftChild := nodeID << 1
 	rightChild := nodeID<<1 | 1
+	if pos <= mid {
+		tree.Update(leaf, pos, leftChild, begin, mid)
+	} else {
+		tree.Update(leaf, pos, rightChild, mid+1, end)
+	}
 	tree.merkleTree[nodeID] = HashConcat(tree.merkleTree[leftChild], tree.merkleTree[rightChild])
 }
 
