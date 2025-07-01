@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -18,13 +17,17 @@ func (t *testData) Serialize() ([]byte, error) {
 }
 
 // generate dummy data blocks
-func generateRandBlocks(size int) (blocks []mt.DataBlock) {
-	for i := 0; i < size; i++ {
-		block := &testData{
-			data: make([]byte, 32),
-		}
-		_, err := rand.Read(block.data)
+func generateRandBlocks() (blocks []mt.DataBlock) {
+	hexStrings := []string{
+		"1a8cd71aeb2aa2af4b47bc876cbc93f6bbee71af2f83ffc9a3c4e2c860e6eff0",
+		"57580b9c14e7ed6fe1f1e6245fda0c26d7213a2904a1c32d55bf354eaac5ac39",
+	}
+	for i, hexStr := range hexStrings {
+		data := make([]byte, 32)
+		_, err := fmt.Sscanf(hexStr, "%x", &data)
 		handleError(err)
+
+		block := &testData{data: data}
 		blocks = append(blocks, block)
 		fmt.Printf("Block %d data: %x\n", i, block.data)
 	}
@@ -32,16 +35,18 @@ func generateRandBlocks(size int) (blocks []mt.DataBlock) {
 }
 
 func main() {
-	blocks := generateRandBlocks(2)
+	blocks := generateRandBlocks()
 	// config with Keccak256Hash as the hash function
 	config := &mt.Config{
 		HashFunc: func(block []byte) ([]byte, error) {
-			if len(block) != 32 && len(block) != 64 {
+			switch len(block) {
+			case 32:
+				return crypto.Keccak256(crypto.Keccak256(block)), nil
+			case 64:
+				return crypto.Keccak256(block), nil
+			default:
 				return nil, fmt.Errorf("invalid block size: %d, expected 32 or 64 bytes", len(block))
 			}
-			hash := crypto.Keccak256(block)
-			// hash = crypto.Keccak256(hash)
-			return hash, nil
 		},
 		SortSiblingPairs: true,
 	}
