@@ -26,6 +26,7 @@ func generateRandBlocks(size int) (blocks []mt.DataBlock) {
 		_, err := rand.Read(block.data)
 		handleError(err)
 		blocks = append(blocks, block)
+		fmt.Printf("Block %d data: %x\n", i, block.data)
 	}
 	return
 }
