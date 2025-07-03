@@ -25,14 +25,17 @@ func NewMerkleTree(data [][]byte, issuerDID, id string) (*MerkleTree, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
+
 	tree := &MerkleTree{}
 	tree.Init(MAX_LEAFS, issuerDID, id)
+
 	for _, item := range data {
 		err := tree.AddLeaf(item)
 		if err != nil {
 			return nil, fmt.Errorf("failed to add leaf: %v", err)
 		}
 	}
+
 	return tree, nil
 }
 
@@ -73,7 +76,7 @@ func (tree *MerkleTree) Update(hash string, pos int) {
 		// println("Updating node:", nodeID, "with hash:", hash, "at position:", pos, "with parent:", (nodeID >> 1), "and sibling:", (nodeID ^ 1))
 		parentID := nodeID >> 1
 		siblingID := nodeID ^ 1
-		tree.merkleTree[parentID] = mergeNodes(tree.merkleTree[nodeID], tree.merkleTree[siblingID])
+		tree.merkleTree[parentID] = MergeNodes(tree.merkleTree[nodeID], tree.merkleTree[siblingID])
 		nodeID = parentID
 	}
 }
@@ -95,7 +98,7 @@ func (tree *MerkleTree) GetMerkleRoot() []byte {
 }
 
 func (tree *MerkleTree) GetProof(data []byte) ([][]byte, error) {
-	hash := hex.EncodeToString(crypto.Keccak256(data))
+	hash := Hash(data)
 
 	pos, exists := tree.leafs[hash]
 	if !exists {
@@ -134,6 +137,7 @@ func (tree *MerkleTree) getListNodesToSave() []int {
 		firstLeafID >>= 1
 		lastLeafID >>= 1
 	}
+
 	return nodesToSave
 }
 
@@ -141,9 +145,11 @@ func (tree *MerkleTree) GetHashValues(nodeID int) (string, error) {
 	if nodeID < 1 || nodeID >= len(tree.merkleTree) {
 		return "", fmt.Errorf("node ID out of range")
 	}
+
 	if tree.merkleTree[nodeID] == "" {
 		return "", fmt.Errorf("node does not exist")
 	}
+
 	return tree.merkleTree[nodeID], nil
 }
 

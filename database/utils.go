@@ -11,7 +11,7 @@ func Hash(data []byte) string {
 	return hex.EncodeToString(crypto.Keccak256(data))
 }
 
-func mergeNodes(a, b string) string {
+func MergeNodes(a, b string) string {
 	aBytes, _ := hex.DecodeString(a)
 	bBytes, _ := hex.DecodeString(b)
 	var combined []byte
