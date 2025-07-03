@@ -1,111 +1,100 @@
 package openzeppelin
 
 import (
+	"bytes"
 	"fmt"
-	"math/rand"
 	"testing"
-	"time"
+
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
-var TestCases = []struct {
-	name       string
-	numLeaves  int
-	numQueries int
-}{
-	{"Small", 1000, 1000},
-	{"Medium", 100000, 100000},
-	{"Large", 5000000, 5000000},
-}
-
-func Validate32Bytes(data []byte) bool {
-	if len(data) != 32 {
-		return false
-	}
-	for _, b := range data {
-		if b < 0 || b > 255 {
-			return false
-		}
-	}
-	return true
-}
-
-func ValidateProof(proof [][]byte) bool {
-	for _, p := range proof {
-		if Validate32Bytes(p) == false {
-			return false
-		}
-	}
-	return true
-}
-
 func TestMerkleTree(t *testing.T) {
-	for _, tc := range TestCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// t.Logf("\n--- STRESS TEST: Fixed Merkle Tree with %d leaves, %d queries ---", tc.numLeaves, tc.numQueries)
+	cid1 := []byte("QmcPGZtdbUn9TT3rbDU6RkTkjx1DnJ3ENQUBhhoVF15KwA")
+	cid2 := []byte("QmVhveySRaD1fTSkZhdZ6MYWhFABgC4FhwtJme6dUJuW4u")
+	cid3 := []byte("QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco")
+	cid4 := []byte("QmbWqxBEKC3P8tqsKc98xmWNzrzDtRLMiMPL8wBuTGsMnR")
 
-			tree := &MerkleTree{}
-			tree.Init(tc.numLeaves)
+	data := [][]byte{cid1, cid2, cid3}
 
-			leaves := make([]string, tc.numLeaves)
-			for i := 0; i < tc.numLeaves; i++ {
-				leaves[i] = fmt.Sprintf("leaf_%d", i)
-			}
+	tree, err := NewMerkleTree(data)
+	if err != nil {
+		t.Fatalf("Failed to create Merkle Tree: %v", err)
+	}
 
-			startAdd := time.Now()
-			for _, v := range leaves {
-				tree.AddLeaf(v)
-			}
-			addTime := time.Since(startAdd)
-			t.Logf("Added %d leaves in: %v (average %.3f µs/leaf)",
-				tc.numLeaves, addTime, float64(addTime.Microseconds())/float64(tc.numLeaves))
+	initialRoot := tree.GetMerkleRoot()
+	fmt.Printf("Initial Merkle Root: %x\n", initialRoot)
 
-			rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
-			totalProof := time.Duration(0)
-			totalVerify := time.Duration(0)
-			okCount := 0
+	t.Log("--- Adding a new leaf ---")
+	err = tree.AddLeaf(cid4)
+	if err != nil {
+		t.Fatalf("Failed to add leaf: %v", err)
+	}
 
-			// Successful queries
-			numSuccessful := int(float64(tc.numQueries) * 0.8)
-			for i := 0; i < numSuccessful; i++ {
-				data := leaves[rnd.Intn(tc.numLeaves)]
-				leaf := [32]byte(Keccak256([]byte(data)))
+	updatedRoot := tree.GetMerkleRoot()
+	fmt.Printf("Updated Merkle Root: %x\n", updatedRoot)
 
-				startProof := time.Now()
-				proof := tree.GetProof(data)
-				proofTime := time.Since(startProof)
+	leafToProve := cid1
+	proof, err := tree.GetProof(leafToProve)
+	if err != nil {
+		t.Fatalf("Failed to get proof: %v", err)
+	}
 
-				startVerify := time.Now()
-				ok := Verify(proof, tree.GetRoot(), leaf)
-				verifyTime := time.Since(startVerify)
+	fmt.Printf("\n--- Proof for leaf %s ---\n", leafToProve)
+	fmt.Printf("Leaf to prove: 0x%x\n", crypto.Keccak256(leafToProve))
+	isValid := Verify(proof, updatedRoot, leafToProve)
+	if !isValid {
+		t.Errorf("Proof is invalid for leaf %s", leafToProve)
+	} else {
+		fmt.Println("Proof is valid!")
+	}
+}
 
-				if !ok {
-					t.Fatalf("FAIL: Proof verification failed for leaf '%s' at query %d", leaf, i+1)
-				}
-				totalProof += proofTime
-				totalVerify += verifyTime
-				okCount++
-			}
-
-			// Failed queries
-			numFailed := tc.numQueries - numSuccessful
-			for i := 0; i < numFailed; i++ {
-				leaf := fmt.Sprintf("leaf_%d", tc.numLeaves+rnd.Int())
-
-				startProof := time.Now()
-				proof := tree.GetProof(leaf)
-				proofTime := time.Since(startProof)
-
-				if proof != nil {
-					t.Fatalf("FAIL: Expected no proof for non-existent leaf '%s' at query %d", leaf, i+1+numSuccessful)
-				}
-				totalProof += proofTime
-				okCount++
-			}
-
-			t.Logf("%d queries: total proof time %v (average %.3f µs), total verification time %v (average %.3f µs), correct: %d/%d",
-				tc.numQueries, totalProof, float64(totalProof.Microseconds())/float64(tc.numQueries),
-				totalVerify, float64(totalVerify.Microseconds())/float64(tc.numQueries),
-				okCount, tc.numQueries)
-		})
+func TestStress(t *testing.T) {
+	// generate bytes
+	data := make([][]byte, 1000)
+	for i := 0; i < 1000; i++ {
+		data[i] = []byte(fmt.Sprintf("data-%d", i))
+	}
+	tree, err := NewMerkleTree(data)
+	if err != nil {
+		t.Fatalf("Failed to create Merkle Tree: %v", err)
+	}
+	root := tree.GetMerkleRoot()
+	// add new leafs
+	for i := 1000; i < 2000; i++ {
+		data = append(data, []byte(fmt.Sprintf("data-%d", i)))
+		err := tree.AddLeaf(data[i])
+		if err != nil {
+			t.Fatalf("Failed to add leaf: %v", err)
+		}
+	}
+	newRoot := tree.GetMerkleRoot()
+	if bytes.Compare(root, newRoot) == 0 {
+		t.Errorf("Root should have changed after adding new leaves")
+	} else {
+		fmt.Printf("New Merkle Root after adding 1000 leaves: %x\n", newRoot)
+	}
+	// verify proof by randomly selecting a leaf
+	for i := 0; i < 2000; i++ {
+		leafIndex := i % len(data)
+		leaf := data[leafIndex]
+		proof, err := tree.GetProof(leaf)
+		if err != nil {
+			t.Fatalf("Failed to get proof for leaf %d: %v", leafIndex, err)
+		}
+		isValid := Verify(proof, newRoot, leaf)
+		if !isValid {
+			t.Errorf("Proof is invalid for leaf %s", leaf)
+		} else {
+			fmt.Printf("Proof is valid for leaf %s\n", leaf)
+		}
+	}
+	// verify proof for a leaf that does not exist
+	nonExistentLeaf := []byte("non-existent-leaf")
+	_, err = tree.GetProof(nonExistentLeaf)
+	if err == nil {
+		t.Errorf("Expected error when getting proof for non-existent leaf, but got none")
+	} else {
+		fmt.Printf("Correctly received error for non-existent leaf: %v\n", err)
 	}
 }

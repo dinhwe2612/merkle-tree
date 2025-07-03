@@ -72,7 +72,16 @@ func main() {
 	for _, sibling := range proofs[0].Siblings {
 		fmt.Printf("%x\n", sibling)
 	}
-	fmt.Println()
+}
+
+func hexStringToBytes(hexStr string) []byte {
+	var data []byte
+	_, err := fmt.Sscanf(hexStr, "%x", &data)
+	if err != nil {
+		fmt.Printf("Error converting hex string to bytes: %v\n", err)
+		return nil
+	}
+	return data
 }
 
 func handleError(err error) {

@@ -2,47 +2,36 @@ package openzeppelin
 
 import (
 	"bytes"
-	"sort"
+	"encoding/hex"
+	"fmt"
 
-	"golang.org/x/crypto/sha3"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 const (
 	MAX_SIZE = 1 << 20
 )
 
-func Keccak256(data []byte) []byte {
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(data)
-	return hash.Sum(nil)
-}
-
-func mergeNodes(a, b [32]byte) [32]byte {
-	// Create a slice of byte slices with actual data
-	nodes := [][]byte{a[:], b[:]}
-
-	// Sort the slices lexicographically
-	sort.Slice(nodes, func(i, j int) bool {
-		return bytes.Compare(nodes[i], nodes[j]) < 0
-	})
-
-	// Concatenate the sorted slices
-	concatenated := append(nodes[0], nodes[1]...)
-
-	// Compute Keccak256 hash (Ethereum uses legacy Keccak, not standard SHA3)
-	hash := sha3.NewLegacyKeccak256()
-	hash.Write(concatenated)
-
-	var result [32]byte
-	copy(result[:], hash.Sum(nil))
-	return result
-}
-
 type MerkleTree struct {
-	merkleTree [][32]byte
-	leafs      map[[32]byte]int
+	merkleTree []string
+	leafs      map[string]int
 	numLeafs   int
 	maxLeafs   int
+}
+
+func NewMerkleTree(data [][]byte) (*MerkleTree, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	tree := &MerkleTree{}
+	tree.Init(MAX_SIZE)
+	for _, item := range data {
+		err := tree.AddLeaf(item)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add leaf: %v", err)
+		}
+	}
+	return tree, nil
 }
 
 func (tree *MerkleTree) Init(maxLeafs int) {
@@ -50,29 +39,29 @@ func (tree *MerkleTree) Init(maxLeafs int) {
 		tree.maxLeafs = MAX_SIZE
 	}
 	tree.maxLeafs = maxLeafs
-	tree.merkleTree = make([][32]byte, tree.maxLeafs<<2)
-	tree.leafs = make(map[[32]byte]int, tree.maxLeafs)
+	tree.merkleTree = make([]string, tree.maxLeafs<<2)
+	tree.leafs = make(map[string]int, tree.maxLeafs)
 	tree.Build(1, 1, tree.maxLeafs)
 	tree.numLeafs = 0
 }
 
-func (tree *MerkleTree) AddLeaf(data string) {
+func (tree *MerkleTree) AddLeaf(data []byte) error {
 	if len(tree.leafs) >= tree.maxLeafs {
-		return
+		return fmt.Errorf("Merkle Tree is full")
 	}
-	leaf := [32]byte(Keccak256([]byte(data)))
-	if _, exists := tree.leafs[leaf]; exists {
-		// raise error if leaf already exists
-		panic("Leaf already exists in the Merkle Tree")
+	hash := hex.EncodeToString(crypto.Keccak256(data))
+	if _, exists := tree.leafs[hash]; exists {
+		return fmt.Errorf("leaf already exists")
 	}
 	tree.numLeafs++
-	tree.leafs[leaf] = tree.numLeafs
-	tree.Update(leaf, tree.leafs[leaf], 1, 1, tree.maxLeafs)
+	tree.leafs[hash] = tree.numLeafs
+	tree.Update(hash, tree.leafs[hash], 1, 1, tree.maxLeafs)
+	return nil
 }
 
 func (tree *MerkleTree) Build(nodeID, begin, end int) {
 	if begin == end {
-		tree.merkleTree[nodeID] = [32]byte(Keccak256([]byte("#")))
+		tree.merkleTree[nodeID] = hex.EncodeToString(crypto.Keccak256([]byte("#")))
 		return
 	}
 	mid := (begin + end) >> 1
@@ -83,39 +72,48 @@ func (tree *MerkleTree) Build(nodeID, begin, end int) {
 	tree.merkleTree[nodeID] = mergeNodes(tree.merkleTree[leftChild], tree.merkleTree[rightChild])
 }
 
-func (tree *MerkleTree) Update(leaf [32]byte, pos int, nodeID, begin, end int) {
+func (tree *MerkleTree) Update(hash string, pos, nodeID, begin, end int) {
 	if begin > end {
 		return
 	}
 	if begin == end {
-		tree.merkleTree[nodeID] = [32]byte(Keccak256(leaf[:]))
+		tree.merkleTree[nodeID] = hash
 		return
 	}
 	mid := (begin + end) >> 1
 	leftChild := nodeID << 1
 	rightChild := nodeID<<1 | 1
 	if pos <= mid {
-		tree.Update(leaf, pos, leftChild, begin, mid)
+		tree.Update(hash, pos, leftChild, begin, mid)
 	} else {
-		tree.Update(leaf, pos, rightChild, mid+1, end)
+		tree.Update(hash, pos, rightChild, mid+1, end)
 	}
 	tree.merkleTree[nodeID] = mergeNodes(tree.merkleTree[leftChild], tree.merkleTree[rightChild])
 }
 
-func (tree *MerkleTree) GetRoot() [32]byte {
+func (tree *MerkleTree) GetMerkleRoot() []byte {
 	if len(tree.leafs) == 0 {
-		return [32]byte{}
+		return []byte{}
 	}
-	return tree.merkleTree[1]
+	rootNode := tree.merkleTree[1]
+	if rootNode == "" {
+		return []byte{}
+	}
+	rootBytes, err := hex.DecodeString(rootNode)
+	if err != nil {
+		fmt.Printf("Error decoding root node: %v\n", err)
+		return []byte{}
+	}
+	return rootBytes
 }
 
-func (tree *MerkleTree) GetProof(data string) [][32]byte {
-	leaf := [32]byte(Keccak256([]byte(data)))
-	pos, exists := tree.leafs[leaf]
-	if !exists || pos == -1 {
-		return nil
+func (tree *MerkleTree) GetProof(data []byte) ([][]byte, error) {
+	hash := hex.EncodeToString(crypto.Keccak256(data))
+	pos, exists := tree.leafs[hash]
+	if !exists {
+		return nil, fmt.Errorf("leaf not found")
 	}
-	proof := make([][32]byte, 0)
+	proof := []string{}
 	nodeID := 1
 	begin, end := 1, tree.maxLeafs
 	for begin < end {
@@ -123,29 +121,41 @@ func (tree *MerkleTree) GetProof(data string) [][32]byte {
 		leftChild := nodeID << 1
 		rightChild := nodeID<<1 | 1
 		if pos <= mid {
-			proof = append([][32]byte{[32]byte(Keccak256(tree.merkleTree[rightChild][:]))}, proof...)
+			proof = append(proof, tree.merkleTree[rightChild])
 			nodeID = leftChild
 			end = mid
 		} else {
-			proof = append(proof, [32]byte(Keccak256(tree.merkleTree[leftChild][:])))
+			proof = append(proof, tree.merkleTree[leftChild])
 			nodeID = rightChild
 			begin = mid + 1
 		}
 	}
-	return proof
+	// reverse the proof
+	for i, j := 0, len(proof)-1; i < j; i, j = i+1, j-1 {
+		proof[i], proof[j] = proof[j], proof[i]
+	}
+	returnBytes := make([][]byte, len(proof))
+	for i, p := range proof {
+		bytes, err := hex.DecodeString(p)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding proof: %v", err)
+		}
+		returnBytes[i] = bytes
+	}
+	return returnBytes, nil
 }
 
-func Verify(proof [][32]byte, root [32]byte, leaf [32]byte) bool {
-	if len(proof) == 0 {
-		return bytes.Equal(root[:], leaf[:])
-	}
-	currentHash := leaf
+func Verify(proof [][]byte, root []byte, data []byte) bool {
+	hashedLeaf := crypto.Keccak256(data)
+	currentHash := hashedLeaf
+
 	for _, p := range proof {
-		if bytes.Compare(currentHash[:], p[:]) < 0 {
-			currentHash = mergeNodes(currentHash, p)
+		if bytes.Compare(currentHash, p) < 0 {
+			currentHash = crypto.Keccak256(append(currentHash, p...))
 		} else {
-			currentHash = mergeNodes(p, currentHash)
+			currentHash = crypto.Keccak256(append(p, currentHash...))
 		}
 	}
-	return bytes.Equal(currentHash[:], root[:])
+
+	return bytes.Equal(currentHash, root)
 }

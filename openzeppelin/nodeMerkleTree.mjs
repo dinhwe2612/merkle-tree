@@ -1,37 +1,25 @@
-import { StandardMerkleTree } from "@openzeppelin/merkle-tree";
+import { SimpleMerkleTree, StandardMerkleTree } from "@openzeppelin/merkle-tree";
 import { keccak256 } from "ethereum-cryptography/keccak";
-import { hexToBytes, bytesToHex } from "ethereum-cryptography/utils";
-import { AbiCoder } from "@ethersproject/abi";
 
-const root = "0x1c931c433cbe3c386bcb7254f224187ec475e4376a969de1532a8a1016892d02";
-const value = [Uint8Array.from(Buffer.from("1a8cd71aeb2aa2af4b47bc876cbc93f6bbee71af2f83ffc9a3c4e2c860e6eff0", "hex"))];
+const root = "0x388b02b93ee3b517ca794a0293ca294dcf222df1c4fb08e2cc498311e70745b7";
+const value = "0xe25b1ca0956dcaefdeb1d3b1ac09beacd0c59a8da38d218beaafe304313ec5e3";
 const proof = [
-  "0x22b6bb2b3c704a7fff4be0431c0b8da25612a2350d983977a339055903f55355",
+  "0x77bf017d3c7c57b13f4075b398f072fc239d6e184b9b72454b759d33070dac49", "0x3b4d86955e34e3c7a99d614089a837d7c2f7cd58bf7fcea6e3ef2b53f711a5af",
 ];
-const types = ["bytes32"];
+const types = ["bytes"];
 
-const isValid = StandardMerkleTree.verify(root, types, value, proof);
+// const hash = Buffer.from(keccak256(value[0]));
+// console.log("Hash of value:", hash.toString("hex"));
+
+const isValid = SimpleMerkleTree.verify(root, value, proof);
 console.log("Merkle proof is valid?", isValid);
 
-const abi = new AbiCoder();
-const encoded = abi.encode(types, value);
-console.log("encoded:", encoded);
-const leaf = keccak256(Buffer.from(encoded.slice(2), "hex"));
 
-let current = leaf;
-for (const sibling of proof) {
-  const sib = hexToBytes(sibling);
-  const pair = [current, sib].sort(Buffer.compare);
-  current = keccak256(Buffer.concat(pair));
-}
-const isValidByHand = "0x" + bytesToHex(current) === root.toLowerCase();
-console.log("Merkle proof is valid by hand?", isValidByHand);
-
-const values = [
-  [Uint8Array.from(Buffer.from("1a8cd71aeb2aa2af4b47bc876cbc93f6bbee71af2f83ffc9a3c4e2c860e6eff0", "hex"))],
-  [Uint8Array.from(Buffer.from("57580b9c14e7ed6fe1f1e6245fda0c26d7213a2904a1c32d55bf354eaac5ac39", "hex"))]
-];
-const types2 = ["bytes32"];
-const tree = StandardMerkleTree.of(values, types2);
-console.log("Merkle root (JS):", tree.root);
-console.log("Proof for leaf 0 (JS):", tree.getProof(0));
+// const values = [
+//   ["0x1a8cd71aeb2aa2af4b47bc876cbc93f6bbee71af2f83ffc9a3c4e2c860e6eff0"],
+//   ["0x57580b9c14e7ed6fe1f1e6245fda0c26d7213a2904a1c32d55bf354eaac5ac39"]
+// ];
+// const types2 = ["bytes32"];
+// const tree = StandardMerkleTree.of(values, types2);
+// console.log("Merkle root (JS):", tree.root);
+// console.log("Proof for leaf 0 (JS):", tree.getProof(0));
