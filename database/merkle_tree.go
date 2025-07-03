@@ -21,12 +21,12 @@ type MerkleTree struct {
 	id         string
 }
 
-func NewMerkleTree(data [][]byte) (*MerkleTree, error) {
+func NewMerkleTree(data [][]byte, issuerDID, id string) (*MerkleTree, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
 	tree := &MerkleTree{}
-	tree.Init(MAX_LEAFS)
+	tree.Init(MAX_LEAFS, issuerDID, id)
 	for _, item := range data {
 		err := tree.AddLeaf(item)
 		if err != nil {
@@ -36,7 +36,7 @@ func NewMerkleTree(data [][]byte) (*MerkleTree, error) {
 	return tree, nil
 }
 
-func (tree *MerkleTree) Init(maxLeafs int) {
+func (tree *MerkleTree) Init(maxLeafs int, issuerDID, id string) {
 	if maxLeafs <= 0 {
 		tree.maxLeafs = MAX_LEAFS
 	}
@@ -44,6 +44,8 @@ func (tree *MerkleTree) Init(maxLeafs int) {
 	tree.merkleTree = make([]string, tree.maxLeafs<<1)
 	tree.leafs = make(map[string]int, tree.maxLeafs)
 	tree.numLeafs = 0
+	tree.issuerDID = issuerDID
+	tree.id = id
 }
 
 func (tree *MerkleTree) AddLeaf(data []byte) error {
