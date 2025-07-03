@@ -39,14 +39,7 @@ func main() {
 	// config with Keccak256Hash as the hash function
 	config := &mt.Config{
 		HashFunc: func(block []byte) ([]byte, error) {
-			switch len(block) {
-			case 32:
-				return crypto.Keccak256(crypto.Keccak256(block)), nil
-			case 64:
-				return crypto.Keccak256(block), nil
-			default:
-				return nil, fmt.Errorf("invalid block size: %d, expected 32 or 64 bytes", len(block))
-			}
+			return crypto.Keccak256(block), nil
 		},
 		SortSiblingPairs: true,
 	}
