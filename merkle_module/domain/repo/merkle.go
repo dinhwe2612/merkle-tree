@@ -1,10 +1,21 @@
 package repo
 
-import "context"
+import (
+	"context"
+	"merkle_module/domain/entities"
+)
 
 type Merkle interface {
-	GetTreeIDByIssuerDIDAndValue(ctx context.Context, issuerDID string, value string) (int, error)
-	GetNodesByTreeID(ctx context.Context, issuerDID string, treeID int) ([]string, error)
-	GetNewNodeIDAndIncreaseCount(ctx context.Context, issuerDID string) (int, int, error)
-	AddNode(ctx context.Context, issuerDID string, treeID int, value string, nodeID int) error
+	GetTreeIDByIssuerDIDAndData(ctx context.Context, issuerDID string, data string) (int, error)
+	GetNodesByTreeID(ctx context.Context, treeID int) ([]string, error)
+	AddNode(ctx context.Context, issuerDID string, data string) (*entities.MerkleNode, error)
+}
+
+type MerklesCache interface {
+	HasData(ctx context.Context, issuerDID string, data []byte) (bool, error)
+	HasTree(ctx context.Context, treeID int) (bool, error)
+	AddNode(ctx context.Context, issuerDID string, treeID int, data []byte) error
+	LoadTree(ctx context.Context, issuerDID string, treeID int, datas [][]byte) error
+	GetProof(ctx context.Context, issuerDID string, data []byte) ([][]byte, error)
+	GetRoot(ctx context.Context, issuerDID string, data []byte) ([]byte, error)
 }

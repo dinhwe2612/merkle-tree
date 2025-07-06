@@ -2,91 +2,119 @@ package services
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"merkle_module/app/interfaces"
+	"merkle_module/domain/entities"
 	"merkle_module/domain/repo"
 	"merkle_module/merkletree"
 )
 
 type MerkleService struct {
-	repo repo.Merkle
+	repo  repo.Merkle
+	cache repo.MerklesCache
 }
 
-func NewMerkleService(repo repo.Merkle) interfaces.Merkle {
-	return &MerkleService{repo: repo}
+func NewMerkleService(repo repo.Merkle, cache repo.MerklesCache) interfaces.Merkle {
+	return &MerkleService{repo: repo, cache: cache}
 }
 
-func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) error {
-	treeID, nodeID, err := s.repo.GetNewNodeIDAndIncreaseCount(ctx, issuerDID)
+func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error) {
+	// Add leaf into database
+	merkleNode, err := s.repo.AddNode(ctx, issuerDID, hex.EncodeToString(data))
 	if err != nil {
-		return fmt.Errorf("failed to get next node ID: %w", err)
+		return nil, fmt.Errorf("failed to add node: %w", err)
 	}
 
-	if err := s.repo.AddNode(ctx, issuerDID, treeID, string(data), nodeID); err != nil {
-		return fmt.Errorf("failed to add node: %w", err)
+	// Check if the tree is loaded in cache
+	treeExists, err := s.cache.HasTree(ctx, merkleNode.TreeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if tree exists in cache: %w", err)
 	}
 
-	return nil
+	if !treeExists {
+		// Tree is not loaded in cache, no need to sync
+		return merkleNode, nil
+	}
+
+	// Update cache with the new node
+	if err := s.cache.AddNode(ctx, issuerDID, merkleNode.TreeID, data); err != nil {
+		return nil, fmt.Errorf("failed to add node to cache: %w", err)
+	}
+
+	return merkleNode, nil
 }
 
 func (s *MerkleService) GetProof(ctx context.Context, issuerDID string, data []byte) ([][]byte, error) {
-	treeID, err := s.repo.GetTreeIDByIssuerDIDAndValue(ctx, issuerDID, string(data))
-	if err != nil {
-		return nil, err
+	// Sync the leaf and tree in cache
+	if err := s.syncLeaf(ctx, issuerDID, data); err != nil {
+		return nil, fmt.Errorf("failed to sync leaf: %w", err)
 	}
 
-	// get the leaf nodes to build the Merkle tree
-	nodes, err := s.repo.GetNodesByTreeID(ctx, issuerDID, treeID)
+	// Get proof from cache
+	proof, err := s.cache.GetProof(ctx, issuerDID, data)
 	if err != nil {
-		return nil, err
-	}
-
-	// convert []string to [][]byte
-	nodeBytes := make([][]byte, len(nodes))
-	for i, node := range nodes {
-		nodeBytes[i] = []byte(node)
-	}
-
-	// build the tree
-	tree, err := merkletree.NewMerkleTree(nodeBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	// get the proof for the original data
-	proof, err := tree.GetProof(data)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get proof from cache: %w", err)
 	}
 
 	return proof, nil
 }
 
 func (s *MerkleService) VerifyProof(ctx context.Context, issuerDID string, data []byte, proof [][]byte) (bool, error) {
-	// Find tree ID of the data
-	treeID, err := s.repo.GetTreeIDByIssuerDIDAndValue(ctx, issuerDID, string(data))
+	rootHash, err := s.cache.GetRoot(ctx, issuerDID, data)
 	if err != nil {
-		return false, fmt.Errorf("failed to get tree ID: %w", err)
+		return false, fmt.Errorf("failed to get root hash from cache: %w", err)
 	}
 
-	nodes, err := s.repo.GetNodesByTreeID(ctx, issuerDID, treeID)
-	if err != nil {
-		return false, fmt.Errorf("failed to get nodes: %w", err)
-	}
+	isValid := merkletree.Verify(proof, rootHash, data)
 
-	// convert []string to [][]byte
-	nodeBytes := make([][]byte, len(nodes))
-	for i, node := range nodes {
-		nodeBytes[i] = []byte(node)
-	}
-
-	// build the tree
-	tree, err := merkletree.NewMerkleTree(nodeBytes)
-	if err != nil {
-		return false, fmt.Errorf("failed to create merkle tree: %w", err)
-	}
-
-	// verify the proof
-	isValid := merkletree.Verify(proof, tree.GetMerkleRoot(), data)
 	return isValid, nil
+}
+
+func (s *MerkleService) syncTree(ctx context.Context, issuerDID string, treeID int) error {
+	nodes, err := s.repo.GetNodesByTreeID(ctx, treeID)
+	if err != nil {
+		return fmt.Errorf("failed to get nodes by tree ID: %w", err)
+	}
+
+	// Convert to bytes
+	var byteNodes [][]byte
+	for _, node := range nodes {
+		data, err := hex.DecodeString(node)
+		if err != nil {
+			return fmt.Errorf("failed to decode node value: %w", err)
+		}
+		byteNodes = append(byteNodes, data)
+	}
+
+	if err := s.cache.LoadTree(ctx, issuerDID, treeID, byteNodes); err != nil {
+		return fmt.Errorf("failed to load tree into cache: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MerkleService) syncLeaf(ctx context.Context, issuerDID string, data []byte) error {
+	// Check if the data exists in cache
+	exists, err := s.cache.HasData(ctx, issuerDID, data)
+	if err != nil {
+		return fmt.Errorf("failed to check if data exists in cache: %w", err)
+	}
+
+	if exists {
+		return nil
+	}
+
+	// Get the tree ID from the database
+	treeID, err := s.repo.GetTreeIDByIssuerDIDAndData(ctx, issuerDID, hex.EncodeToString(data))
+	if err != nil {
+		return fmt.Errorf("failed to get tree ID by issuer DID and data: %w", err)
+	}
+
+	// Sync the tree
+	if err := s.syncTree(ctx, issuerDID, treeID); err != nil {
+		return fmt.Errorf("failed to sync tree: %w", err)
+	}
+
+	return nil
 }

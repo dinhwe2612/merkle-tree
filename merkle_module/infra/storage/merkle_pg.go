@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"merkle_module/domain/entities"
 	"merkle_module/domain/repo"
 	"merkle_module/utils"
 )
@@ -16,7 +17,7 @@ func NewMerklePostgres(db *sql.DB) repo.Merkle {
 	return &MerklePostgres{db: db}
 }
 
-func (m *MerklePostgres) GetTreeIDByIssuerDIDAndValue(ctx context.Context, issuerDID string, value string) (int, error) {
+func (m *MerklePostgres) GetTreeIDByIssuerDIDAndData(ctx context.Context, issuerDID string, value string) (int, error) {
 	var treeID int
 	err := m.db.QueryRowContext(ctx, `
 	SELECT nodes.tree_id
@@ -34,32 +35,24 @@ func (m *MerklePostgres) GetTreeIDByIssuerDIDAndValue(ctx context.Context, issue
 	return treeID, nil
 }
 
-func (m *MerklePostgres) GetNodesByTreeID(ctx context.Context, issuerDID string, treeID int) ([]string, error) {
+func (m *MerklePostgres) GetNodesByTreeID(ctx context.Context, treeID int) ([]string, error) {
 	rows, err := m.db.QueryContext(ctx, `
-	SELECT nodes.node_id, nodes.value 
+	SELECT nodes.value 
 	FROM merkle_nodes nodes
-	JOIN merkle_trees trees ON nodes.tree_id = trees.id
-	WHERE trees.issuer_did = $1 AND nodes.tree_id = $2
+	WHERE nodes.tree_id = $1
 	ORDER BY nodes.node_id
-	`, issuerDID, treeID)
+	`, treeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query nodes by tree ID: %w", err)
 	}
 	defer rows.Close()
 
 	var nodes []string
-	lastID := 1
 	for rows.Next() {
-		var nodeID int
 		var value string
-		if err := rows.Scan(&nodeID, &value); err != nil {
+		if err := rows.Scan(&value); err != nil {
 			return nil, fmt.Errorf("failed to scan node: %w", err)
 		}
-		// append the empty value between the gap
-		for i := lastID; i < nodeID; i++ {
-			nodes = append(nodes, "")
-		}
-		lastID = nodeID + 1
 		nodes = append(nodes, value)
 	}
 
@@ -70,49 +63,80 @@ func (m *MerklePostgres) GetNodesByTreeID(ctx context.Context, issuerDID string,
 	return nodes, nil
 }
 
-func (m *MerklePostgres) AddNode(ctx context.Context, issuerDID string, treeID int, value string, nodeID int) error {
-	// insert the new node
-	_, err := m.db.ExecContext(ctx, `
-	INSERT INTO merkle_nodes (tree_id, node_id, value)
-	VALUES ($1, $2, $3)
-	`, treeID, nodeID, value)
+func (m *MerklePostgres) AddNode(ctx context.Context, issuerDID string, value string) (*entities.MerkleNode, error) {
+	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to insert node: %w", err)
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Check if the data already exists for this issuer
+	if exists, err := m.checkDataExists(ctx, tx, issuerDID, value); err != nil {
+		return nil, err
+	} else if exists {
+		return nil, fmt.Errorf("data already exists for issuer %s: %s", issuerDID, value)
 	}
 
-	return nil
-}
-
-// gets or creates a tree, returns the new node ID of the tree, and increases the node count
-// if the current tree is full (node_count >= MAX_LEAFS), it creates a new tree
-func (m *MerklePostgres) GetNewNodeIDAndIncreaseCount(ctx context.Context, issuerDID string) (int, int, error) {
-	// find an existing tree not full and increase node_count in one query
+	// Find an existing tree not full and increase node_count
 	var treeID int
 	var newNodeID int
-	err := m.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 	UPDATE merkle_trees 
 	SET node_count = node_count + 1
 	WHERE issuer_did = $1 AND node_count < $2
 	RETURNING id, node_count
 	`, issuerDID, utils.MAX_LEAFS).Scan(&treeID, &newNodeID)
 
-	if err == nil {
-		return treeID, newNodeID, nil
+	if err == sql.ErrNoRows {
+		// Create a new tree
+		err = tx.QueryRowContext(ctx, `
+		INSERT INTO merkle_trees (issuer_did, node_count)
+		VALUES ($1, 1)
+		RETURNING id
+		`, issuerDID).Scan(&treeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new tree: %w", err)
+		}
+		newNodeID = 1
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to update existing tree: %w", err)
 	}
 
-	if err != sql.ErrNoRows {
-		return 0, 0, fmt.Errorf("failed to update existing tree: %w", err)
-	}
-
-	// create a new tree
-	err = m.db.QueryRowContext(ctx, `
-	INSERT INTO merkle_trees (issuer_did, node_count)
-	VALUES ($1, 1)
+	// Insert the new node
+	var nodeID int
+	err = tx.QueryRowContext(ctx, `
+	INSERT INTO merkle_nodes (tree_id, node_id, value)
+	VALUES ($1, $2, $3)
 	RETURNING id
-	`, issuerDID).Scan(&treeID)
+	`, treeID, newNodeID, value).Scan(&nodeID)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to create new tree: %w", err)
+		return nil, fmt.Errorf("failed to insert node: %w", err)
 	}
 
-	return treeID, 1, nil
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &entities.MerkleNode{
+		ID:     nodeID,
+		TreeID: treeID,
+		NodeID: newNodeID,
+		Value:  value,
+	}, nil
+}
+
+func (m *MerklePostgres) checkDataExists(ctx context.Context, tx *sql.Tx, issuerDID string, value string) (bool, error) {
+	var exists bool
+	err := tx.QueryRowContext(ctx, `
+	SELECT EXISTS (
+		SELECT 1 
+		FROM merkle_nodes nodes
+		JOIN merkle_trees trees ON nodes.tree_id = trees.id
+		WHERE trees.issuer_did = $1 AND nodes.value = $2
+	)
+	`, issuerDID, value).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if data exists: %w", err)
+	}
+	return exists, nil
 }
