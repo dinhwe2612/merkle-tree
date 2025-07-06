@@ -70,13 +70,6 @@ func (m *MerklePostgres) AddNode(ctx context.Context, issuerDID string, value st
 	}
 	defer tx.Rollback()
 
-	// Check if the data already exists for this issuer
-	if exists, err := m.checkDataExists(ctx, tx, issuerDID, value); err != nil {
-		return nil, err
-	} else if exists {
-		return nil, fmt.Errorf("data already exists for issuer %s: %s", issuerDID, value)
-	}
-
 	// Find an existing tree not full and increase node_count
 	var treeID int
 	var newNodeID int
@@ -86,6 +79,13 @@ func (m *MerklePostgres) AddNode(ctx context.Context, issuerDID string, value st
 	WHERE issuer_did = $1 AND node_count < $2
 	RETURNING id, node_count
 	`, issuerDID, utils.MAX_LEAFS).Scan(&treeID, &newNodeID)
+
+	// Check if the data already exists for this issuer
+	if exists, err := m.checkDataExists(ctx, tx, issuerDID, value); err != nil {
+		return nil, err
+	} else if exists {
+		return nil, fmt.Errorf("data already exists for issuer %s: %s", issuerDID, value)
+	}
 
 	if err == sql.ErrNoRows {
 		// Create a new tree
