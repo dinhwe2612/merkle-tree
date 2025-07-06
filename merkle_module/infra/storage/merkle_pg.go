@@ -86,48 +86,32 @@ func (m *MerklePostgres) AddNode(ctx context.Context, issuerDID string, treeID i
 // gets or creates a tree, returns the new node ID of the tree, and increases the node count
 // if the current tree is full (node_count >= MAX_LEAFS), it creates a new tree
 func (m *MerklePostgres) GetNewNodeIDAndIncreaseCount(ctx context.Context, issuerDID string) (int, int, error) {
-	// Start transaction
-	tx, err := m.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
 	// find an existing tree not full and increase node_count in one query
 	var treeID int
 	var newNodeID int
-	err = tx.QueryRowContext(ctx, `
-	UPDATE merkle_trees
+	err := m.db.QueryRowContext(ctx, `
+	UPDATE merkle_trees 
 	SET node_count = node_count + 1
 	WHERE issuer_did = $1 AND node_count < $2
 	RETURNING id, node_count
 	`, issuerDID, utils.MAX_LEAFS).Scan(&treeID, &newNodeID)
 
 	if err == nil {
-		if err = tx.Commit(); err != nil {
-			tx.Rollback()
-			return 0, 0, fmt.Errorf("failed to commit transaction: %w", err)
-		}
-
 		return treeID, newNodeID, nil
 	}
 
 	if err != sql.ErrNoRows {
-		return 0, 0, fmt.Errorf("failed to query existing tree: %w", err)
+		return 0, 0, fmt.Errorf("failed to update existing tree: %w", err)
 	}
 
 	// create a new tree
-	err = tx.QueryRowContext(ctx, `
+	err = m.db.QueryRowContext(ctx, `
 	INSERT INTO merkle_trees (issuer_did, node_count)
 	VALUES ($1, 1)
 	RETURNING id
 	`, issuerDID).Scan(&treeID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to create new tree: %w", err)
-	}
-
-	if err = tx.Commit(); err != nil {
-		tx.Rollback()
-		return 0, 0, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return treeID, 1, nil
