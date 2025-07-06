@@ -41,8 +41,14 @@ func (s *MerkleService) GetProof(ctx context.Context, issuerDID string, data []b
 		return nil, err
 	}
 
+	// convert []string to [][]byte
+	nodeBytes := make([][]byte, len(nodes))
+	for i, node := range nodes {
+		nodeBytes[i] = []byte(node)
+	}
+
 	// build the tree
-	tree, err := merkletree.NewMerkleTree(nodes)
+	tree, err := merkletree.NewMerkleTree(nodeBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -68,8 +74,14 @@ func (s *MerkleService) VerifyProof(ctx context.Context, issuerDID string, data 
 		return false, fmt.Errorf("failed to get nodes: %w", err)
 	}
 
+	// convert []string to [][]byte
+	nodeBytes := make([][]byte, len(nodes))
+	for i, node := range nodes {
+		nodeBytes[i] = []byte(node)
+	}
+
 	// build the tree
-	tree, err := merkletree.NewMerkleTree(nodes)
+	tree, err := merkletree.NewMerkleTree(nodeBytes)
 	if err != nil {
 		return false, fmt.Errorf("failed to create merkle tree: %w", err)
 	}

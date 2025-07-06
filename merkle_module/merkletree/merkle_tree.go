@@ -12,19 +12,19 @@ import (
 
 type MerkleTree struct {
 	merkleTree []string
-	leafs      map[string]int
+	leafMap    map[string]int
 	numLeafs   int
 	maxLeafs   int
 }
 
-func NewMerkleTree(hashes []string) (*MerkleTree, error) {
-	if len(hashes) == 0 {
+func NewMerkleTree(datas [][]byte) (*MerkleTree, error) {
+	if len(datas) == 0 {
 		return nil, nil
 	}
 
 	tree := &MerkleTree{}
 	tree.Init(utils.MAX_LEAFS)
-	tree.build(hashes)
+	tree.build(datas)
 
 	return tree, nil
 }
@@ -35,23 +35,29 @@ func (tree *MerkleTree) Init(maxLeafs int) {
 	}
 	tree.maxLeafs = maxLeafs
 	tree.merkleTree = make([]string, tree.maxLeafs<<1)
-	tree.leafs = make(map[string]int, tree.maxLeafs)
-	tree.numLeafs = 0
+	tree.leafMap = make(map[string]int, tree.maxLeafs)
 }
 
-func (tree *MerkleTree) build(hashes []string) error {
-	if len(hashes) == 0 {
-		return fmt.Errorf("no hashes provided to build the Merkle Tree")
+func (tree *MerkleTree) build(datas [][]byte) error {
+	if len(datas) == 0 {
+		return fmt.Errorf("no datas provided to build the Merkle Tree")
 	}
 
-	for _, hash := range hashes {
-		if err := tree.AddLeaf([]byte(hash)); err != nil {
-			return fmt.Errorf("error adding leaf: %v", err)
+	// build leaf map
+	for i, data := range datas {
+		hash := utils.Hash(data)
+		if _, exists := tree.leafMap[hash]; exists {
+			return fmt.Errorf("duplicate leaf data found: %s", hash)
 		}
+		tree.leafMap[hash] = i + 1
+		tree.merkleTree[tree.maxLeafs+i] = hash
 	}
 
-	for left, right := tree.maxLeafs>>1, (tree.maxLeafs+tree.numLeafs-1)>>1; left < right; left, right = left>>1, right>>1 {
-		for nodeID := left; nodeID < right; nodeID++ {
+	tree.numLeafs = len(datas)
+
+	// compute hashes for parent nodes
+	for level := tree.maxLeafs >> 1; level >= 1; level >>= 1 {
+		for nodeID := level; nodeID < level<<1; nodeID++ {
 			leftChild := tree.merkleTree[nodeID<<1]
 			rightChild := tree.merkleTree[nodeID<<1|1]
 			tree.merkleTree[nodeID] = utils.MergeNodes(leftChild, rightChild)
@@ -62,18 +68,18 @@ func (tree *MerkleTree) build(hashes []string) error {
 }
 
 func (tree *MerkleTree) AddLeaf(data []byte) error {
-	if len(tree.leafs) >= tree.maxLeafs {
+	if len(tree.leafMap) >= tree.maxLeafs {
 		return fmt.Errorf("Merkle Tree is full")
 	}
 
-	hash := hex.EncodeToString(crypto.Keccak256(data))
-	if _, exists := tree.leafs[hash]; exists {
+	hash := utils.Hash(data)
+	if _, exists := tree.leafMap[hash]; exists {
 		return fmt.Errorf("leaf already exists")
 	}
 
 	tree.numLeafs++
-	tree.leafs[hash] = tree.numLeafs
-	tree.Update(hash, tree.leafs[hash])
+	tree.leafMap[hash] = tree.numLeafs
+	tree.Update(hash, tree.leafMap[hash])
 
 	return nil
 }
@@ -92,7 +98,7 @@ func (tree *MerkleTree) Update(hash string, pos int) {
 }
 
 func (tree *MerkleTree) GetMerkleRoot() []byte {
-	if len(tree.leafs) == 0 {
+	if len(tree.leafMap) == 0 {
 		return []byte{}
 	}
 
@@ -110,7 +116,7 @@ func (tree *MerkleTree) GetMerkleRoot() []byte {
 func (tree *MerkleTree) GetProof(data []byte) ([][]byte, error) {
 	hash := utils.Hash(data)
 
-	pos, exists := tree.leafs[hash]
+	pos, exists := tree.leafMap[hash]
 	if !exists {
 		return nil, fmt.Errorf("leaf not found")
 	}

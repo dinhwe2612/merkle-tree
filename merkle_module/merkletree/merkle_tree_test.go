@@ -14,7 +14,7 @@ func TestMerkleTree(t *testing.T) {
 	cid3 := "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco"
 	cid4 := "QmbWqxBEKC3P8tqsKc98xmWNzrzDtRLMiMPL8wBuTGsMnR"
 
-	data := []string{cid1, cid2, cid3}
+	data := [][]byte{[]byte(cid1), []byte(cid2), []byte(cid3)}
 
 	tree, err := NewMerkleTree(data)
 	if err != nil {
@@ -51,9 +51,9 @@ func TestMerkleTree(t *testing.T) {
 
 func TestStress(t *testing.T) {
 	// generate strings
-	data := make([]string, 1000)
+	data := make([][]byte, 1000)
 	for i := 0; i < 1000; i++ {
-		data[i] = fmt.Sprintf("data-%d", i)
+		data[i] = []byte(fmt.Sprintf("data-%d", i))
 	}
 	tree, err := NewMerkleTree(data)
 	if err != nil {
@@ -62,9 +62,9 @@ func TestStress(t *testing.T) {
 	root := tree.GetMerkleRoot()
 	// add new leafs
 	for i := 1000; i < 2000; i++ {
-		newData := fmt.Sprintf("data-%d", i)
+		newData := []byte(fmt.Sprintf("data-%d", i))
 		data = append(data, newData)
-		err := tree.AddLeaf([]byte(newData))
+		err := tree.AddLeaf(newData)
 		if err != nil {
 			t.Fatalf("Failed to add leaf: %v", err)
 		}
@@ -79,13 +79,13 @@ func TestStress(t *testing.T) {
 	for i := 0; i < 2000; i++ {
 		leafIndex := i % len(data)
 		leaf := data[leafIndex]
-		proof, err := tree.GetProof([]byte(leaf))
+		proof, err := tree.GetProof(leaf)
 		if err != nil {
 			t.Fatalf("Failed to get proof for leaf %d: %v", leafIndex, err)
 		}
-		isValid := Verify(proof, newRoot, []byte(leaf))
+		isValid := Verify(proof, newRoot, leaf)
 		if !isValid {
-			t.Errorf("Proof is invalid for leaf %s", leaf)
+			t.Errorf("Proof is invalid for leaf %s", string(leaf))
 			return
 		}
 	}
