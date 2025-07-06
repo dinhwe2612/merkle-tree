@@ -4,7 +4,6 @@ go 1.24.2
 
 require (
 	github.com/ethereum/go-ethereum v1.16.0
-	github.com/lib/pq v1.10.9
 	github.com/txaty/go-merkletree v0.2.2
 )
 

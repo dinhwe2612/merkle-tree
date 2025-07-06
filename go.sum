@@ -8,8 +8,6 @@ github.com/ethereum/go-ethereum v1.16.0 h1:Acf8FlRmcSWEJm3lGjlnKTdNgFvF9/l28oQ8Q
 github.com/ethereum/go-ethereum v1.16.0/go.mod h1:ngYIvmMAYdo4sGW9cGzLvSsPGhDOOzL0jK5S5iXpj0g=
 github.com/holiman/uint256 v1.3.2 h1:a9EgMPSC1AAaj1SZL5zIQD3WbwTuHrMGOerLjGmM/TA=
 github.com/holiman/uint256 v1.3.2/go.mod h1:EOMSn4q6Nyt9P6efbI3bueV4e1b3dGlUCXeiRV4ng7E=
-github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=
-github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
 github.com/txaty/go-merkletree v0.2.2 h1:K5bHDFK+Q3KK+gEJeyTOECKuIwl/LVo4CI+cm0/p34g=
 github.com/txaty/go-merkletree v0.2.2/go.mod h1:w5HPEu7ubNw5LzS+91m+1/GtuZcWHKiPU3vEGi+ThJM=
 golang.org/x/crypto v0.39.0 h1:SHs+kF4LP+f+p14esP5jAoDpHU8Gu/v9lFRK6IT5imM=

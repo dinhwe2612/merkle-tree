@@ -1,15 +1,13 @@
-package database
+package merkletree
 
 import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/crypto"
-)
+	"merkle_module/utils"
 
-const (
-	MAX_LEAFS = 1 << 15
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 type MerkleTree struct {
@@ -17,38 +15,50 @@ type MerkleTree struct {
 	leafs      map[string]int
 	numLeafs   int
 	maxLeafs   int
-	issuerDID  string
-	id         string
 }
 
-func NewMerkleTree(data [][]byte, issuerDID, id string) (*MerkleTree, error) {
-	if len(data) == 0 {
+func NewMerkleTree(hashes []string) (*MerkleTree, error) {
+	if len(hashes) == 0 {
 		return nil, nil
 	}
 
 	tree := &MerkleTree{}
-	tree.Init(MAX_LEAFS, issuerDID, id)
-
-	for _, item := range data {
-		err := tree.AddLeaf(item)
-		if err != nil {
-			return nil, fmt.Errorf("failed to add leaf: %v", err)
-		}
-	}
+	tree.Init(utils.MAX_LEAFS)
+	tree.build(hashes)
 
 	return tree, nil
 }
 
-func (tree *MerkleTree) Init(maxLeafs int, issuerDID, id string) {
+func (tree *MerkleTree) Init(maxLeafs int) {
 	if maxLeafs <= 0 {
-		tree.maxLeafs = MAX_LEAFS
+		tree.maxLeafs = utils.MAX_LEAFS
 	}
 	tree.maxLeafs = maxLeafs
 	tree.merkleTree = make([]string, tree.maxLeafs<<1)
 	tree.leafs = make(map[string]int, tree.maxLeafs)
 	tree.numLeafs = 0
-	tree.issuerDID = issuerDID
-	tree.id = id
+}
+
+func (tree *MerkleTree) build(hashes []string) error {
+	if len(hashes) == 0 {
+		return fmt.Errorf("no hashes provided to build the Merkle Tree")
+	}
+
+	for _, hash := range hashes {
+		if err := tree.AddLeaf([]byte(hash)); err != nil {
+			return fmt.Errorf("error adding leaf: %v", err)
+		}
+	}
+
+	for left, right := tree.maxLeafs>>1, (tree.maxLeafs+tree.numLeafs-1)>>1; left < right; left, right = left>>1, right>>1 {
+		for nodeID := left; nodeID < right; nodeID++ {
+			leftChild := tree.merkleTree[nodeID<<1]
+			rightChild := tree.merkleTree[nodeID<<1|1]
+			tree.merkleTree[nodeID] = utils.MergeNodes(leftChild, rightChild)
+		}
+	}
+
+	return nil
 }
 
 func (tree *MerkleTree) AddLeaf(data []byte) error {
@@ -76,7 +86,7 @@ func (tree *MerkleTree) Update(hash string, pos int) {
 		// println("Updating node:", nodeID, "with hash:", hash, "at position:", pos, "with parent:", (nodeID >> 1), "and sibling:", (nodeID ^ 1))
 		parentID := nodeID >> 1
 		siblingID := nodeID ^ 1
-		tree.merkleTree[parentID] = MergeNodes(tree.merkleTree[nodeID], tree.merkleTree[siblingID])
+		tree.merkleTree[parentID] = utils.MergeNodes(tree.merkleTree[nodeID], tree.merkleTree[siblingID])
 		nodeID = parentID
 	}
 }
@@ -98,7 +108,7 @@ func (tree *MerkleTree) GetMerkleRoot() []byte {
 }
 
 func (tree *MerkleTree) GetProof(data []byte) ([][]byte, error) {
-	hash := Hash(data)
+	hash := utils.Hash(data)
 
 	pos, exists := tree.leafs[hash]
 	if !exists {
@@ -124,7 +134,7 @@ func (tree *MerkleTree) GetProof(data []byte) ([][]byte, error) {
 	return returnBytes, nil
 }
 
-func (tree *MerkleTree) getListNodesToSave() []int {
+func (tree *MerkleTree) GetListNodesToSave() []int {
 	firstLeafID := tree.maxLeafs
 	lastLeafID := firstLeafID + tree.numLeafs - 1
 	nodesToSave := make([]int, 0, tree.numLeafs)

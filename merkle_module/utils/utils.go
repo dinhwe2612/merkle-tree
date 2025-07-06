@@ -1,10 +1,14 @@
-package database
+package utils
 
 import (
 	"bytes"
 	"encoding/hex"
 
 	"github.com/ethereum/go-ethereum/crypto"
+)
+
+const (
+	MAX_LEAFS = 1 << 15
 )
 
 func Hash(data []byte) string {
