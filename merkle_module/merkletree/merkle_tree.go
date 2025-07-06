@@ -31,7 +31,7 @@ func NewMerkleTree(hashes []string) (*MerkleTree, error) {
 
 func (tree *MerkleTree) Init(maxLeafs int) {
 	if maxLeafs <= 0 {
-		tree.maxLeafs = utils.MAX_LEAFS
+		maxLeafs = utils.MAX_LEAFS
 	}
 	tree.maxLeafs = maxLeafs
 	tree.merkleTree = make([]string, tree.maxLeafs<<1)
