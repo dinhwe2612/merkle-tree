@@ -16,7 +16,7 @@ func NewMerklePostgres(db *sql.DB) repo.Merkle {
 	return &MerklePostgres{db: db}
 }
 
-func (m *MerklePostgres) GetTreeIDByValue(ctx context.Context, issuerDID string, value string) (int, error) {
+func (m *MerklePostgres) GetTreeIDByIssuerDIDAndValue(ctx context.Context, issuerDID string, value string) (int, error) {
 	var treeID int
 	err := m.db.QueryRowContext(ctx, `
 	SELECT nodes.tree_id
@@ -76,58 +76,32 @@ func (m *MerklePostgres) AddNode(ctx context.Context, issuerDID string, treeID i
 	return nil
 }
 
-// gets or creates a tree, returns the next node ID, and increases the node count
+// gets or creates a tree, returns the new node ID of the tree, and increases the node count
 // if the current tree is full (node_count >= MAX_LEAFS), it creates a new tree
-func (m *MerklePostgres) GetNextNodeIDAndIncreaseCount(ctx context.Context, issuerDID string) (int, int, error) {
+func (m *MerklePostgres) GetNewNodeIDAndIncreaseCount(ctx context.Context, issuerDID string) (int, int, error) {
 	// Start transaction
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	// find an existing tree not full
-	// put an update lock to prevent other transactions from modifying
+	// find an existing tree not full and increase node_count in one query
 	var treeID int
-	var nodeCount int
+	var newNodeID int
 	err = tx.QueryRowContext(ctx, `
-	SELECT id, node_count 
-	FROM merkle_trees 
+	UPDATE merkle_trees
+	SET node_count = node_count + 1
 	WHERE issuer_did = $1 AND node_count < $2
-	ORDER BY id DESC
-	LIMIT 1
-	FOR UPDATE
-	`, issuerDID, utils.MAX_LEAFS).Scan(&treeID, &nodeCount)
+	RETURNING id, node_count
+	`, issuerDID, utils.MAX_LEAFS).Scan(&treeID, &newNodeID)
 
 	if err == nil {
-		// get the next node ID based on existing nodes
-		var nextNodeID int
-		err = tx.QueryRowContext(ctx, `
-		SELECT MAX(node_id) + 1
-		FROM merkle_nodes
-		WHERE tree_id = $1
-		`, treeID).Scan(&nextNodeID)
-		if err != nil {
-			tx.Rollback()
-			return 0, 0, fmt.Errorf("failed to get next node ID: %w", err)
-		}
-
-		_, err := tx.ExecContext(ctx, `
-		UPDATE merkle_trees 
-		SET node_count = node_count + 1
-		WHERE id = $1 AND node_count < $2
-		`, treeID, utils.MAX_LEAFS)
-		if err != nil {
-			tx.Rollback()
-			return 0, 0, fmt.Errorf("failed to update node count: %w", err)
-		}
-
-		// Commit transaction
 		if err = tx.Commit(); err != nil {
 			tx.Rollback()
 			return 0, 0, fmt.Errorf("failed to commit transaction: %w", err)
 		}
 
-		return treeID, nextNodeID, nil
+		return treeID, newNodeID, nil
 	}
 
 	if err != sql.ErrNoRows {

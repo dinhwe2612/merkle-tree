@@ -17,7 +17,7 @@ func NewMerkleService(repo repo.Merkle) interfaces.Merkle {
 }
 
 func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) error {
-	treeID, nodeID, err := s.repo.GetNextNodeIDAndIncreaseCount(ctx, issuerDID)
+	treeID, nodeID, err := s.repo.GetNewNodeIDAndIncreaseCount(ctx, issuerDID)
 	if err != nil {
 		return fmt.Errorf("failed to get next node ID: %w", err)
 	}
@@ -30,7 +30,7 @@ func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []by
 }
 
 func (s *MerkleService) GetProof(ctx context.Context, issuerDID string, data []byte) ([][]byte, error) {
-	treeID, err := s.repo.GetTreeIDByValue(ctx, issuerDID, string(data))
+	treeID, err := s.repo.GetTreeIDByIssuerDIDAndValue(ctx, issuerDID, string(data))
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (s *MerkleService) GetProof(ctx context.Context, issuerDID string, data []b
 
 func (s *MerkleService) VerifyProof(ctx context.Context, issuerDID string, data []byte, proof [][]byte) (bool, error) {
 	// Find tree ID of the data
-	treeID, err := s.repo.GetTreeIDByValue(ctx, issuerDID, string(data))
+	treeID, err := s.repo.GetTreeIDByIssuerDIDAndValue(ctx, issuerDID, string(data))
 	if err != nil {
 		return false, fmt.Errorf("failed to get tree ID: %w", err)
 	}
