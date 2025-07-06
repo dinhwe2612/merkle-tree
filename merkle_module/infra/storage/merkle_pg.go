@@ -36,7 +36,7 @@ func (m *MerklePostgres) GetTreeIDByIssuerDIDAndValue(ctx context.Context, issue
 
 func (m *MerklePostgres) GetNodesByTreeID(ctx context.Context, issuerDID string, treeID int) ([]string, error) {
 	rows, err := m.db.QueryContext(ctx, `
-	SELECT nodes.value 
+	SELECT nodes.node_id, nodes.value 
 	FROM merkle_nodes nodes
 	JOIN merkle_trees trees ON nodes.tree_id = trees.id
 	WHERE trees.issuer_did = $1 AND nodes.tree_id = $2
@@ -48,11 +48,18 @@ func (m *MerklePostgres) GetNodesByTreeID(ctx context.Context, issuerDID string,
 	defer rows.Close()
 
 	var nodes []string
+	lastID := 1
 	for rows.Next() {
+		var nodeID int
 		var value string
-		if err := rows.Scan(&value); err != nil {
-			return nil, fmt.Errorf("failed to scan node value: %w", err)
+		if err := rows.Scan(&nodeID, &value); err != nil {
+			return nil, fmt.Errorf("failed to scan node: %w", err)
 		}
+		// append the empty value between the gap
+		for i := lastID; i < nodeID; i++ {
+			nodes = append(nodes, "")
+		}
+		lastID = nodeID + 1
 		nodes = append(nodes, value)
 	}
 
