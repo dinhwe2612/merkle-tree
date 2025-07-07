@@ -39,46 +39,52 @@ func main() {
 	ctx := context.Background()
 	issuerDID := "did:example:test_cli"
 	numLeaves := 1000
-	channel := make(chan *entities.MerkleNode, numLeaves)
+	channel := make(chan result, numLeaves)
 	datas := make([][]byte, numLeaves)
 
 	for i := 0; i < numLeaves; i++ {
 		data := randomBytes(32)
 		datas[i] = data
 		dataHash := utils.Hash(data)
-		go func(data []byte) {
+		go func(idx int, data []byte) {
 			node, err := merkleService.AddLeaf(ctx, issuerDID, data)
 			if err != nil {
 				log.Printf("Error adding leaf: %v", err)
-				channel <- nil
+				channel <- result{idx, nil}
 				return
 			}
-			channel <- node
-		}(dataHash)
+			channel <- result{idx, node}
+		}(i, dataHash)
 	}
 
+	failCount := 0
 	for i := 0; i < numLeaves; i++ {
-		node := <-channel
-		if node == nil {
+		res := <-channel
+		if res.node == nil {
 			log.Println("Received nil node from channel")
+			failCount++
 			continue
 		}
-		proof, err := merkleService.GetProof(ctx, node.TreeID, node.NodeID)
+		proof, err := merkleService.GetProof(ctx, res.node.TreeID, res.node.NodeID)
 		if err != nil {
-			log.Printf("Error getting proof for node %d: %v", node.NodeID, err)
+			log.Printf("Error getting proof for node %d: %v", res.node.NodeID, err)
+			failCount++
 			continue
 		}
-		root, err := merkleService.GetRoot(ctx, node.TreeID)
+		root, err := merkleService.GetRoot(ctx, res.node.TreeID)
 		if err != nil {
-			log.Printf("Error getting root for node %d: %v", node.NodeID, err)
+			log.Printf("Error getting root for node %d: %v", res.node.NodeID, err)
+			failCount++
 			continue
 		}
-		if !utils.Verify(proof, root, datas[i]) {
-			log.Printf("Proof verification failed for node %d: NodeID=%d, TreeID=%d", i, node.NodeID, node.TreeID)
+		if !utils.Verify(proof, root, datas[res.idx]) {
+			log.Printf("Proof verification failed for node %d: NodeID=%d, TreeID=%d", res.idx, res.node.NodeID, res.node.TreeID)
+			failCount++
 		} else {
-			log.Printf("Proof verified for node %d: NodeID=%d, TreeID=%d", i, node.NodeID, node.TreeID)
+			log.Printf("Proof verified for node %d: NodeID=%d, TreeID=%d", res.idx, res.node.NodeID, res.node.TreeID)
 		}
 	}
+	log.Printf("Tổng số lần verify proof bị fail: %d", failCount)
 }
 
 func randomBytes(n int) []byte {
@@ -94,4 +100,9 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+type result struct {
+	idx  int
+	node *entities.MerkleNode
 }
