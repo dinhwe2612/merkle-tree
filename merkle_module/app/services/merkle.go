@@ -91,41 +91,39 @@ func (s *MerkleService) getActiveTreeID(ctx context.Context, issuerDID string) (
 func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error) {
 	// Check if the active tree ID of the issuer DID is cached
 	activeTreeID, exists := s.getActiveTreeID(ctx, issuerDID)
+	var nodeID int
 	if !exists {
 		// If not cached, get the active tree for inserting
-		nodes, err := s.repo.GetActiveTreeForInserting(ctx, issuerDID)
+		activeTree, err := s.repo.GetActiveTreeForInserting(ctx, issuerDID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get active tree for inserting: %w", err)
 		}
 
 		// Create a new Merkle tree
-		tree, err := merkletree.NewMerkleTree(nodes.Nodes, nodes.TreeID)
+		tree, err := merkletree.NewMerkleTree(activeTree.Nodes, activeTree.TreeID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new merkle tree: %w", err)
 		}
 
-		activeTreeID = nodes.TreeID
+		activeTreeID = activeTree.TreeID
 		s.cacheTrees.Add(activeTreeID, tree)
 		s.cacheActiveTreeIDs.Add(issuerDID, activeTreeID)
-	}
-
-	// Get the tree by active tree ID
-	tree, err := s.getTree(ctx, activeTreeID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tree: %w", err)
-	}
-
-	// Add the leaf to the tree
-	tree.AddLeaf(data)
-
-	// Get the node ID of the added leaf
-	nodeID, err := tree.GetLastNodeID()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get last node ID: %w", err)
+		nodeID = activeTree.NodeCount // Use node_count from DB as NodeID
+	} else {
+		// Get the tree by active tree ID
+		tree, err := s.getTree(ctx, activeTreeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get tree: %w", err)
+		}
+		tree.AddLeaf(data)
+		nodeID, err = tree.GetLastNodeID()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get last node ID: %w", err)
+		}
 	}
 
 	// Add the node to the database
-	node, err := s.repo.AddNode(ctx, tree.GetTreeID(), nodeID, data)
+	node, err := s.repo.AddNode(ctx, activeTreeID, nodeID, data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add node: %w", err)
 	}

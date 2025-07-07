@@ -120,45 +120,26 @@ func (m *MerklePostgres) GetActiveTreeForInserting(ctx context.Context, issuerDI
 		}
 	}()
 
-	// Get the active tree ID for the issuer DID
 	var treeID int
-	err = tx.QueryRowContext(ctx, `
-	SELECT id 
-	FROM merkle_trees 
-	WHERE issuer_did = $1 AND node_count < $2 
-	FOR UPDATE
-	`, issuerDID, utils.MAX_LEAFS).Scan(&treeID)
-	if err == sql.ErrNoRows {
-		// If not found, create a new one
-		err = tx.QueryRowContext(ctx, `
-		INSERT INTO merkle_trees (issuer_did, node_count) 
-		VALUES ($1, 1) 
-		RETURNING id
-		`, issuerDID).Scan(&treeID)
+	var nodeID int
+	if err = tx.QueryRowContext(ctx, `SELECT id, node_count FROM merkle_trees WHERE issuer_did = $1 AND node_count < $2 FOR UPDATE`, issuerDID, utils.MAX_LEAFS).Scan(&treeID, &nodeID); err == sql.ErrNoRows {
+		// If not found, create a new one with node_count = 1
+		err = tx.QueryRowContext(ctx, `INSERT INTO merkle_trees (issuer_did, node_count) VALUES ($1, 1) RETURNING id, node_count`, issuerDID).Scan(&treeID, &nodeID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create new merkle tree: %w", err)
 		}
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to get active tree id: %w", err)
 	} else {
-		// If found, increase node_count by 1 to reserve a slot
-		_, err = tx.ExecContext(ctx, `
-		UPDATE merkle_trees 
-		SET node_count = node_count + 1 
-		WHERE id = $1
-		`, treeID)
+		// If found, increase node_count by 1 and get the new value
+		err = tx.QueryRowContext(ctx, `UPDATE merkle_trees SET node_count = node_count + 1 WHERE id = $1 RETURNING node_count`, treeID).Scan(&nodeID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to update node_count: %w", err)
+			return nil, fmt.Errorf("failed to update and return node_count: %w", err)
 		}
 	}
 
 	// Get the nodes for the active tree
-	rows, err := tx.QueryContext(ctx, `
-	SELECT data 
-	FROM merkle_nodes 
-	WHERE tree_id = $1 
-	ORDER BY node_id
-	`, treeID)
+	rows, err := tx.QueryContext(ctx, `SELECT data FROM merkle_nodes WHERE tree_id = $1 ORDER BY node_id`, treeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get nodes by tree ID: %w", err)
 	}
@@ -175,7 +156,7 @@ func (m *MerklePostgres) GetActiveTreeForInserting(ctx context.Context, issuerDI
 	return &model.ActiveTree{
 		TreeID:    treeID,
 		IssuerDID: issuerDID,
-		NodeCount: len(nodes) + 1, // Already reserved a slot for the next node
+		NodeCount: nodeID, // Already reserved a slot for the next node
 		Nodes:     nodes,
 	}, nil
 }
