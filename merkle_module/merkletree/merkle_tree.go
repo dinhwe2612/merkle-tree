@@ -3,6 +3,7 @@ package merkletree
 import (
 	"bytes"
 	"fmt"
+	"sync"
 
 	"merkle_module/utils"
 )
@@ -13,6 +14,8 @@ type MerkleTree struct {
 	numLeafs int
 	maxLeafs int
 	treeID   int
+	mu sync.Mutex // mutex to ensure thread safety
+	    // mutex for thread safety
 }
 
 func NewMerkleTree(datas [][]byte, treeID int) (*MerkleTree, error) {
@@ -48,8 +51,8 @@ func (tree *MerkleTree) build(datas [][]byte) error {
 	tree.numLeafs = len(datas)
 
 	// compute hashes for parent nodes
-	for level := tree.maxLeafs >> 1; level >= 1; level >>= 1 {
-		for nodeID := level; nodeID < level<<1; nodeID++ {
+	for parentStart := tree.maxLeafs >> 1; parentStart >= 1; parentStart >>= 1 {
+		for nodeID := parentStart; nodeID < parentStart<<1; nodeID++ {
 			leftChild := tree.nodes[nodeID<<1]
 			rightChild := tree.nodes[nodeID<<1|1]
 			tree.nodes[nodeID] = utils.MergeNodes(leftChild, rightChild)
@@ -60,6 +63,8 @@ func (tree *MerkleTree) build(datas [][]byte) error {
 }
 
 func (tree *MerkleTree) AddLeaf(data []byte) {
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
 	tree.numLeafs++
 	tree.leafMap[string(data)] = tree.numLeafs // store position starting from 1
 	tree.Update(data, tree.leafMap[string(data)])

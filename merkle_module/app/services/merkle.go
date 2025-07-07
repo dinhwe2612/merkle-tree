@@ -12,12 +12,13 @@ import (
 )
 
 type MerkleService struct {
-	repo  repo.Merkle
-	cache *lru.Cache[int, *merkletree.MerkleTree] // cache the Merkle trees
+	repo               repo.Merkle
+	cacheTrees         *lru.Cache[int, *merkletree.MerkleTree] // cache the Merkle trees
+	cacheActiveTreeIDs *lru.Cache[string, int]                 // cache the active Merkle tree IDs
 }
 
-func NewMerkleService(repo repo.Merkle, cache *lru.Cache[int, *merkletree.MerkleTree]) interfaces.Merkle {
-	return &MerkleService{repo: repo, cache: cache}
+func NewMerkleService(repo repo.Merkle, cacheTrees *lru.Cache[int, *merkletree.MerkleTree], cacheActiveTreeIDs *lru.Cache[string, int]) interfaces.Merkle {
+	return &MerkleService{repo: repo, cacheTrees: cacheTrees, cacheActiveTreeIDs: cacheActiveTreeIDs}
 }
 
 // helper function to build a new Merkle tree from the database
@@ -45,7 +46,7 @@ func (s *MerkleService) buildTree(ctx context.Context, treeID int) (*merkletree.
 // helper function to get tree from cache or build it from database
 func (s *MerkleService) getTree(ctx context.Context, treeID int) (*merkletree.MerkleTree, error) {
 	// Get the tree from the cache
-	tree, exists := s.cache.Get(treeID)
+	tree, exists := s.cacheTrees.Get(treeID)
 
 	// If the tree exists in the cache, return it
 	if exists && tree != nil {
@@ -64,40 +65,72 @@ func (s *MerkleService) getTree(ctx context.Context, treeID int) (*merkletree.Me
 	}
 
 	// set the tree in the cache
-	_ = s.cache.Add(treeID, tree)
+	_ = s.cacheTrees.Add(treeID, tree)
 
 	return tree, nil
 }
 
-func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error) {
-	// Get the active tree ID for the issuer DID
-	treeID, err := s.repo.GetActiveTreeID(ctx, issuerDID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get active tree ID: %w", err)
+// helper function to get the active tree ID for an issuer DID
+// , it also check if the active tree ID still correct, if not, return not found
+func (s *MerkleService) getActiveTreeID(ctx context.Context, issuerDID string) (int, bool) {
+	// Check if the active tree ID is cached
+	activeTreeID, exists := s.cacheActiveTreeIDs.Get(issuerDID)
+	if exists {
+		// check if the tree is full or not
+		tree, exists := s.cacheTrees.Get(activeTreeID)
+		if exists && tree != nil {
+			if !tree.IsFull() {
+				return activeTreeID, true // return the cached active tree ID if the tree is not full
+			}
+		}
 	}
 
-	// Get the tree by tree ID
-	tree, err := s.getTree(ctx, treeID)
+	return 0, false // return 0 and false if the active tree ID is not cached or the tree is full
+}
+
+func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error) {
+	// Check if the active tree ID of the issuer DID is cached
+	activeTreeID, exists := s.getActiveTreeID(ctx, issuerDID)
+	if !exists {
+		// If not cached, get the active tree for inserting
+		nodes, err := s.repo.GetActiveTreeForInserting(ctx, issuerDID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get active tree for inserting: %w", err)
+		}
+
+		// Create a new Merkle tree
+		tree, err := merkletree.NewMerkleTree(nodes.Nodes, nodes.TreeID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create new merkle tree: %w", err)
+		}
+
+		activeTreeID = nodes.TreeID
+		s.cacheTrees.Add(activeTreeID, tree)
+		s.cacheActiveTreeIDs.Add(issuerDID, activeTreeID)
+	}
+
+	// Get the tree by active tree ID
+	tree, err := s.getTree(ctx, activeTreeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tree: %w", err)
 	}
 
-	// Save to tree
+	// Add the leaf to the tree
 	tree.AddLeaf(data)
 
-	// Get the node ID from the cache
+	// Get the node ID of the added leaf
 	nodeID, err := tree.GetLastNodeID()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get last node ID from tree: %w", err)
+		return nil, fmt.Errorf("failed to get last node ID: %w", err)
 	}
 
-	// Save to database
-	merkleNode, err := s.repo.AddNode(ctx, tree.GetTreeID(), nodeID, data)
+	// Add the node to the database
+	node, err := s.repo.AddNode(ctx, tree.GetTreeID(), nodeID, data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to add node to database: %w", err)
+		return nil, fmt.Errorf("failed to add node: %w", err)
 	}
 
-	return merkleNode, nil
+	return node, nil
 }
 
 func (s *MerkleService) GetProof(ctx context.Context, treeID, nodeID int) ([][]byte, error) {

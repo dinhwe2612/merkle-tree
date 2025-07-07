@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"merkle_module/domain/entities"
 	"merkle_module/domain/repo"
+	"merkle_module/infra/model"
 	"merkle_module/utils"
 )
 
@@ -102,5 +103,26 @@ func (m *MerklePostgres) AddNode(ctx context.Context, treeID int, nodeID int, da
 	return &entities.MerkleNode{
 		TreeID: treeID,
 		NodeID: nodeID,
+	}, nil
+}
+
+func (m *MerklePostgres) GetActiveTreeForInserting(ctx context.Context, issuerDID string) (*model.ActiveTree, error) {
+	// Get the active tree ID for the issuer DID
+	treeID, err := m.GetActiveTreeID(ctx, issuerDID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active tree ID: %w", err)
+	}
+
+	// Get the nodes for the active tree
+	nodes, err := m.GetNodesByTreeID(ctx, treeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes by tree ID: %w", err)
+	}
+
+	return &model.ActiveTree{
+		TreeID:    treeID,
+		IssuerDID: issuerDID,
+		NodeCount: len(nodes) + 1,
+		Nodes:     nodes,
 	}, nil
 }

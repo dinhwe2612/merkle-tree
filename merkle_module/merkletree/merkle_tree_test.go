@@ -117,4 +117,5 @@ func TestStress(t *testing.T) {
 			return
 		}
 	}
+	fmt.Printf("Stress Test: All proofs verified successfully for %d leaves\n", maxLeafs)
 }
