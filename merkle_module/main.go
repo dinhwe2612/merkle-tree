@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"log"
+	"merkle_module/app/interfaces"
 	"merkle_module/app/services"
+	"merkle_module/domain/entities"
 	"merkle_module/infra/storage"
-	"merkle_module/merkletree"
+	"merkle_module/utils"
 	"os"
 
+	"merkle_module/merkletree"
+
+	"github.com/ethereum/go-ethereum/common/lru"
 	_ "github.com/joho/godotenv/autoload"
 	_ "github.com/lib/pq"
 )
@@ -29,111 +32,92 @@ func main() {
 	}
 
 	merkleRepo := storage.NewMerklePostgres(db)
-	merkleCache := storage.NewMerklesInMemory()
+	merkleCache := lru.NewCache[int, *merkletree.MerkleTree](10)
 	merkleService := services.NewMerkleService(merkleRepo, merkleCache)
 
 	ctx := context.Background()
+	issuerDID := "did:example:test_cli"
+	data := []byte("test_data_1")
 
-	issuerDID := "did:example:test_" + generateRandomHash()[:8]
-	testData := []byte(generateRandomData())
-
-	fmt.Printf("\nMerkle Service Test\n==========================\n")
-	fmt.Printf("Issuer: %s\n", issuerDID)
-	fmt.Printf("Data:   %s\n", string(testData))
-
-	// Add leaf
-	fmt.Print("Adding leaf... ")
-	merkleNode, err := merkleService.AddLeaf(ctx, issuerDID, testData)
+	fmt.Println("\n==== TEST AddLeaf ====")
+	node, err := merkleService.AddLeaf(ctx, issuerDID, data)
 	if err != nil {
-		fmt.Printf("%v\n", err)
+		fmt.Printf("AddLeaf error: %v\n", err)
 		return
 	}
-	fmt.Printf("Success (Node ID: %d, Tree ID: %d)\n", merkleNode.NodeID, merkleNode.TreeID)
+	fmt.Printf("AddLeaf success: NodeID=%d, TreeID=%d\n", node.NodeID, node.TreeID)
 
-	// Try to add the same data again (should fail)
-	fmt.Print("Adding duplicate data... ")
-	_, err = merkleService.AddLeaf(ctx, issuerDID, testData)
+	fmt.Println("\n==== TEST GetProof ====")
+	proof, err := merkleService.GetProof(ctx, node.TreeID, node.NodeID)
 	if err != nil {
-		fmt.Printf("Expected error: %v\n", err)
+		fmt.Printf("GetProof error: %v\n", err)
+		return
+	}
+	fmt.Printf("GetProof success: proof length=%d\n", len(proof))
+
+	fmt.Println("\n==== TEST GetRoot ====")
+	root, err := merkleService.GetRoot(ctx, node.TreeID)
+	if err != nil {
+		fmt.Printf("GetRoot error: %v\n", err)
+		return
+	}
+	fmt.Printf("GetRoot success: %x\n", root)
+
+	fmt.Println("\n==== TEST lỗi GetProof với nodeID không tồn tại ====")
+	_, err = merkleService.GetProof(ctx, node.TreeID, 99999)
+	if err != nil {
+		fmt.Printf("GetProof (nodeID không tồn tại) error: %v\n", err)
 	} else {
-		fmt.Println("Unexpected success - should have failed")
-		return
+		fmt.Println("GetProof (nodeID không tồn tại) không báo lỗi (KHÔNG ĐÚNG)")
 	}
 
-	// Add different data for the same issuer
-	fmt.Print("Adding different data for same issuer... ")
-	differentData := []byte(generateRandomData())
-	fmt.Printf("Data: %s\n", string(differentData))
-	merkleNode2, err := merkleService.AddLeaf(ctx, issuerDID, differentData)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
-	fmt.Printf("Success (Node ID: %d, Tree ID: %d)\n", merkleNode2.NodeID, merkleNode2.TreeID)
+	fmt.Println("\n==== STRESS TEST ====")
+	numLeaves := 10
+	stressTres(ctx, merkleService, issuerDID, numLeaves)
+	fmt.Println("Stress test completed.")
+}
 
-	// Get proof for first data
-	fmt.Print("Getting proof for first data... ")
-	proof, err := merkleService.GetProof(ctx, issuerDID, testData)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
+func stressTres(ctx context.Context, service interfaces.Merkle, issuerDID string, numLeaves int) {
+	var datas [][]byte
+	var nodes []*entities.MerkleNode
+	log.Printf("Starting stress test with %d leaves for issuer DID: %s", numLeaves, issuerDID)
+	for i := 0; i < numLeaves; i++ {
+		data := randomBytes(32) // Random 32 bytes
+		node, err := service.AddLeaf(ctx, issuerDID, utils.Hash(data))
+		if err != nil {
+			log.Printf("AddLeaf error: %v", err)
+			return
+		}
+		nodes = append(nodes, node)
+		datas = append(datas, data)
 	}
-	fmt.Printf("Success (proof length: %d)\n", len(proof))
+	fmt.Printf("Total leaves added: %d\n", len(datas))
 
-	// Verify proof for first data
-	fmt.Print("Verifying proof for first data... ")
-	root, err := merkleService.GetRoot(ctx, issuerDID, testData)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
-	isValid := merkletree.Verify(proof, root, testData)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
-	if isValid {
-		fmt.Println("Proof is valid!")
-	} else {
-		fmt.Println("Proof is invalid!")
-	}
-
-	// Get proof for second data
-	fmt.Print("Getting proof for second data... ")
-	proof2, err := merkleService.GetProof(ctx, issuerDID, differentData)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
-	fmt.Printf("Success (proof length: %d)\n", len(proof2))
-
-	// Verify proof for second data
-	fmt.Print("Verifying proof for second data... ")
-	root, err = merkleService.GetRoot(ctx, issuerDID, differentData)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
-	isValid2 := merkletree.Verify(proof2, differentData, root)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return
-	}
-	if isValid2 {
-		fmt.Println("Proof is valid!")
-	} else {
-		fmt.Println("Proof is invalid!")
+	for i, node := range nodes {
+		proof, err := service.GetProof(ctx, node.TreeID, node.NodeID)
+		if err != nil {
+			log.Printf("GetProof error for node %d: %v", i, err)
+			return
+		}
+		root, err := service.GetRoot(ctx, node.TreeID)
+		if err != nil {
+			log.Printf("GetRoot error for node %d: %v", i, err)
+			return
+		}
+		// Verify the proof
+		if !utils.Verify(proof, root, datas[i]) {
+			fmt.Printf("Proof verification failed for node %d: NodeID=%d, TreeID=%d\n", i, node.NodeID, node.TreeID)
+			return
+		}
 	}
 }
 
-func generateRandomHash() string {
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
-}
-
-func generateRandomData() string {
-	return fmt.Sprintf("test_data_%s", generateRandomHash()[:8])
+func randomBytes(n int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(i % 256) // Just a simple pattern for testing
+	}
+	return b
 }
 
 func getEnv(key, defaultValue string) string {

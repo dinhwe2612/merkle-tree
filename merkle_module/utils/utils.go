@@ -2,7 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"encoding/hex"
 
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -11,18 +10,31 @@ const (
 	MAX_LEAFS = 1 << 15
 )
 
-func Hash(data []byte) string {
-	return hex.EncodeToString(crypto.Keccak256(data))
+func Hash(data []byte) []byte {
+	return crypto.Keccak256(data)
 }
 
-func MergeNodes(a, b string) string {
-	aBytes, _ := hex.DecodeString(a)
-	bBytes, _ := hex.DecodeString(b)
+func MergeNodes(a, b []byte) []byte {
 	var combined []byte
-	if bytes.Compare(aBytes, bBytes) < 0 {
-		combined = append(aBytes, bBytes...)
+	if bytes.Compare(a, b) < 0 {
+		combined = append(a, b...)
 	} else {
-		combined = append(bBytes, aBytes...)
+		combined = append(b, a...)
 	}
-	return hex.EncodeToString(crypto.Keccak256(combined))
+	return crypto.Keccak256(combined)
+}
+
+func Verify(proof [][]byte, root []byte, data []byte) bool {
+	hashedLeaf := crypto.Keccak256(data)
+	currentHash := hashedLeaf
+
+	for _, p := range proof {
+		if bytes.Compare(currentHash, p) < 0 {
+			currentHash = crypto.Keccak256(append(currentHash, p...))
+		} else {
+			currentHash = crypto.Keccak256(append(p, currentHash...))
+		}
+	}
+
+	return bytes.Equal(currentHash, root)
 }

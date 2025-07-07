@@ -1,11 +1,9 @@
 package merkletree
 
 import (
-	"bytes"
 	"fmt"
+	"merkle_module/utils"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestMerkleTree(t *testing.T) {
@@ -16,83 +14,107 @@ func TestMerkleTree(t *testing.T) {
 
 	data := [][]byte{[]byte(cid1), []byte(cid2), []byte(cid3)}
 
-	tree, err := NewMerkleTree(data, 0) // 0 is a placeholder for treeID, as we don't need it here
+	hashData := make([][]byte, len(data))
+	for i, cid := range data {
+		hashData[i] = utils.Hash(cid)
+		fmt.Printf("Hash of %s: %x\n", cid, hashData[i])
+	}
+
+	tree, err := NewMerkleTree(hashData, 0) // 0 is a placeholder for treeID, as we don't need it here
 	if err != nil {
 		t.Fatalf("Failed to create Merkle Tree: %v", err)
 	}
 
-	initialRoot := tree.GetMerkleRoot()
-	fmt.Printf("Initial Merkle Root: %x\n", initialRoot)
+	fmt.Printf("Merkle Tree created with %d leaves\n", tree.numLeafs)
+	fmt.Printf("Root hash: %x\n", tree.nodes[1])
 
-	t.Log("--- Adding a new leaf ---")
-	err = tree.AddLeaf([]byte(cid4))
-	if err != nil {
-		t.Fatalf("Failed to add leaf: %v", err)
+	// Check if the tree contains the original data
+	for _, cid := range data {
+		hashData := utils.Hash([]byte(cid))
+		if !tree.Contains(hashData) {
+			t.Errorf("Merkle Tree does not contain data: %s", cid)
+			return
+		} else {
+			fmt.Printf("Merkle Tree contains data: %s\n", cid)
+		}
 	}
 
-	updatedRoot := tree.GetMerkleRoot()
-	fmt.Printf("Updated Merkle Root: %x\n", updatedRoot)
+	// Verify the data
+	for i, cid := range data {
+		proof, err := tree.GetProof(i + 1) // Get proof for the leaf node, position starts from 1
+		if err != nil {
+			t.Errorf("Failed to get proof for data %s: %v", cid, err)
+			continue
+		}
 
-	leafToProve := cid1
-	proof, err := tree.GetProof([]byte(leafToProve))
-	if err != nil {
-		t.Fatalf("Failed to get proof: %v", err)
+		if !utils.Verify(proof, tree.nodes[1], []byte(cid)) {
+			t.Errorf("Proof verification failed for data: %s", cid)
+			return
+		} else {
+			fmt.Printf("Proof verified successfully for data: %s\n", cid)
+		}
 	}
 
-	fmt.Printf("\n--- Proof for leaf %s ---\n", leafToProve)
-	fmt.Printf("Leaf to prove: 0x%x\n", crypto.Keccak256([]byte(leafToProve)))
-	isValid := Verify(proof, updatedRoot, []byte(leafToProve))
-	if !isValid {
-		t.Errorf("Proof is invalid for leaf %s", leafToProve)
+	// Add a new node to the tree
+	newData := []byte(cid4)
+	newDataHash := utils.Hash(newData)
+	tree.AddLeaf(newDataHash)
+	fmt.Printf("Added new data: %s\n", cid4)
+	if !tree.Contains(newDataHash) {
+		t.Errorf("Merkle Tree does not contain newly added data: %s", cid4)
 	} else {
-		fmt.Println("Proof is valid!")
+		fmt.Printf("Merkle Tree contains newly added data: %s\n", cid4)
 	}
+	// Verify the new data
+	proof, err := tree.GetProof(tree.numLeafs) // Get proof for the newly
+	if err != nil {
+		t.Errorf("Failed to get proof for new data %s: %v", cid4, err)
+	} else {
+		if !utils.Verify(proof, tree.nodes[1], newData) {
+			t.Errorf("Proof verification failed for new data: %s", cid4)
+		} else {
+			fmt.Printf("Proof verified successfully for new data: %s\n", cid4)
+		}
+	}
+
 }
 
 func TestStress(t *testing.T) {
-	// generate strings
-	data := make([][]byte, 1000)
-	for i := 0; i < 1000; i++ {
-		data[i] = []byte(fmt.Sprintf("data-%d", i))
-	}
-	tree, err := NewMerkleTree(data, 0) // 0 is a placeholder for treeID, as we don't need it here
+	// This test is designed to stress the Merkle Tree implementation
+	maxLeafs := 1 << 15 // 32768 leaves
+	tree, err := NewMerkleTree(nil, maxLeafs)
 	if err != nil {
 		t.Fatalf("Failed to create Merkle Tree: %v", err)
 	}
-	root := tree.GetMerkleRoot()
-	// add new leafs
-	for i := 1000; i < 2000; i++ {
-		newData := []byte(fmt.Sprintf("data-%d", i))
-		data = append(data, newData)
-		err := tree.AddLeaf(newData)
-		if err != nil {
-			t.Fatalf("Failed to add leaf: %v", err)
-		}
-	}
-	newRoot := tree.GetMerkleRoot()
-	if bytes.Compare(root, newRoot) == 0 {
-		t.Errorf("Root should have changed after adding new leaves")
-	} else {
-		fmt.Printf("New Merkle Root after adding 1000 leaves: %x\n", newRoot)
-	}
-	// verify proof by randomly selecting a leaf
-	for i := 0; i < 2000; i++ {
-		leafIndex := i % len(data)
-		leaf := data[leafIndex]
-		proof, err := tree.GetProof(leaf)
-		if err != nil {
-			t.Fatalf("Failed to get proof for leaf %d: %v", leafIndex, err)
-		}
-		isValid := Verify(proof, newRoot, leaf)
-		if !isValid {
-			t.Errorf("Proof is invalid for leaf %s", string(leaf))
+
+	fmt.Printf("Stress Test: Created Merkle Tree with max %d leaves\n", maxLeafs)
+	for i := 0; i < maxLeafs; i++ {
+		data := fmt.Sprintf("data-%d", i)
+		hashData := utils.Hash([]byte(data))
+		tree.AddLeaf(hashData)
+		if !tree.Contains(hashData) {
+			t.Errorf("Merkle Tree does not contain data: %s", data)
 			return
 		}
 	}
-	// verify proof for a leaf that does not exist
-	nonExistentLeaf := []byte("non-existent-leaf")
-	_, err = tree.GetProof(nonExistentLeaf)
-	if err == nil {
-		t.Errorf("Expected error when getting proof for non-existent leaf, but got none")
+	fmt.Printf("Stress Test: Added %d leaves to the Merkle Tree\n", maxLeafs)
+	root := tree.GetMerkleRoot()
+	if len(root) == 0 {
+		t.Errorf("Merkle Tree root is empty after adding %d leaves", maxLeafs)
+		return
+	}
+	fmt.Printf("Stress Test: Merkle Tree root hash after adding %d leaves: %x\n", maxLeafs, root)
+	for i := 0; i < maxLeafs; i++ {
+		data := fmt.Sprintf("data-%d", i)
+		proof, err := tree.GetProof(i + 1) // Get proof for the leaf node, position starts from 1
+		if err != nil {
+			t.Errorf("Failed to get proof for data %s: %v", data, err)
+			continue
+		}
+
+		if !utils.Verify(proof, root, []byte(data)) {
+			t.Errorf("Proof verification failed for data: %s", data)
+			return
+		}
 	}
 }

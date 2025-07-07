@@ -4,7 +4,7 @@ type MerkleNode struct {
 	ID     int    `json:"id"`
 	TreeID int    `json:"tree_id"`
 	NodeID int    `json:"node_id"`
-	Value  string `json:"value"`
+	Data   []byte `json:"value"`
 }
 
 type MerkleTree struct {

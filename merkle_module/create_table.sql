@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS merkle_nodes (
     id SERIAL PRIMARY KEY,
     tree_id INT NOT NULL,
     node_id INT NOT NULL,
-    value VARCHAR(255) NOT NULL,
-    FOREIGN KEY (tree_id) REFERENCES merkle_trees(id),
-    CONSTRAINT unique_value_per_tree UNIQUE (tree_id, value)
+    value BYTEA NOT NULL,
+    FOREIGN KEY (tree_id) REFERENCES merkle_trees(id)
 );

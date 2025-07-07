@@ -6,7 +6,7 @@ import (
 )
 
 type Merkle interface {
-	AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error)
-	GetProof(ctx context.Context, issuerDID string, data []byte) ([][]byte, error)
-	GetRoot(ctx context.Context, issuerDID string, data []byte) ([]byte, error)
+	AddLeaf(ctx context.Context, issuerDID string, hashValue []byte) (*entities.MerkleNode, error)
+	GetProof(ctx context.Context, treeID, nodeID int) ([][]byte, error)
+	GetRoot(ctx context.Context, treeID int) ([]byte, error)
 }
