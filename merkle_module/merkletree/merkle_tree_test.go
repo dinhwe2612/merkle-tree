@@ -16,7 +16,7 @@ func TestMerkleTree(t *testing.T) {
 
 	data := [][]byte{[]byte(cid1), []byte(cid2), []byte(cid3)}
 
-	tree, err := NewMerkleTree(data)
+	tree, err := NewMerkleTree(data, 0) // 0 is a placeholder for treeID, as we don't need it here
 	if err != nil {
 		t.Fatalf("Failed to create Merkle Tree: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestStress(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		data[i] = []byte(fmt.Sprintf("data-%d", i))
 	}
-	tree, err := NewMerkleTree(data)
+	tree, err := NewMerkleTree(data, 0) // 0 is a placeholder for treeID, as we don't need it here
 	if err != nil {
 		t.Fatalf("Failed to create Merkle Tree: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"log"
 	"merkle_module/app/services"
 	"merkle_module/infra/storage"
+	"merkle_module/merkletree"
 	"os"
 
 	_ "github.com/joho/godotenv/autoload"
@@ -81,7 +82,12 @@ func main() {
 
 	// Verify proof for first data
 	fmt.Print("Verifying proof for first data... ")
-	isValid, err := merkleService.VerifyProof(ctx, issuerDID, testData, proof)
+	root, err := merkleService.GetRoot(ctx, issuerDID, testData)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return
+	}
+	isValid := merkletree.Verify(proof, root, testData)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		return
@@ -103,7 +109,12 @@ func main() {
 
 	// Verify proof for second data
 	fmt.Print("Verifying proof for second data... ")
-	isValid2, err := merkleService.VerifyProof(ctx, issuerDID, differentData, proof2)
+	root, err = merkleService.GetRoot(ctx, issuerDID, differentData)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return
+	}
+	isValid2 := merkletree.Verify(proof2, differentData, root)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 		return

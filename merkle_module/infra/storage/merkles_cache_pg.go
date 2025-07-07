@@ -5,115 +5,77 @@ import (
 	"fmt"
 	"merkle_module/domain/repo"
 	"merkle_module/merkletree"
-	"merkle_module/utils"
 	"sync"
 )
 
 type MerklesInMemory struct {
-	treeMap map[int]*merkletree.MerkleTree
-	leafMap map[string]int // issuer_did | data -> treeID
+	treeMap map[string]*merkletree.MerkleTree // issuerDID -> MerkleTree
 	lock    sync.Mutex
 }
 
 func NewMerklesInMemory() repo.MerklesCache {
 	return &MerklesInMemory{
-		treeMap: make(map[int]*merkletree.MerkleTree),
-		leafMap: make(map[string]int),
+		treeMap: make(map[string]*merkletree.MerkleTree),
+		lock:    sync.Mutex{},
 	}
 }
 
-func (m *MerklesInMemory) HasData(ctx context.Context, issuerDID string, data []byte) (bool, error) {
+func (m *MerklesInMemory) GetTree(ctx context.Context, issuerDID string) (*merkletree.MerkleTree, error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	key := fmt.Sprintf("%s|%s", issuerDID, utils.Hash(data))
-	_, exists := m.leafMap[key]
-	return exists, nil
-}
-
-func (m *MerklesInMemory) HasTree(ctx context.Context, treeID int) (bool, error) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	_, exists := m.treeMap[treeID]
-	return exists, nil
-}
-
-func (m *MerklesInMemory) AddNode(ctx context.Context, issuerDID string, treeID int, data []byte) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	key := fmt.Sprintf("%s|%s", issuerDID, utils.Hash(data))
-	if _, exists := m.leafMap[key]; exists {
-		return fmt.Errorf("data already exists in cache")
-	}
-
-	tree, exists := m.treeMap[treeID]
+	tree, exists := m.treeMap[issuerDID]
 	if !exists {
-		return fmt.Errorf("tree with ID %d does not exist in cache", treeID)
+		return nil, nil // Tree not found
 	}
 
-	tree.AddLeaf(data)
-	m.leafMap[key] = treeID
+	// If the tree is full, remove it from the cache and return nil
+	if tree.IsFull() {
+		delete(m.treeMap, issuerDID)
+		return nil, nil
+	}
+
+	return tree, nil
+}
+
+func (m *MerklesInMemory) BuildTree(ctx context.Context, issuerDID string, treeID int, nodes []string) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	// Convert nodes to byte slices
+	byteNodes := make([][]byte, len(nodes))
+	for i, node := range nodes {
+		byteNodes[i] = []byte(node)
+	}
+
+	// Create a new Merkle tree
+	tree, err := merkletree.NewMerkleTree(byteNodes, treeID)
+	if err != nil {
+		return fmt.Errorf("failed to create new merkle tree: %w", err)
+	}
+	if tree == nil {
+		return fmt.Errorf("failed to create new merkle tree: tree is nil")
+	}
+
+	m.treeMap[issuerDID] = tree
 
 	return nil
 }
 
-func (m *MerklesInMemory) LoadTree(ctx context.Context, issuerDID string, treeID int, datas [][]byte) error {
+func (m *MerklesInMemory) GetTreeByIssuerDIDAndData(ctx context.Context, issuerDID string, data []byte) *merkletree.MerkleTree {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	tree, err := merkletree.NewMerkleTree(datas)
-	if err != nil {
-		return fmt.Errorf("failed to create new Merkle tree: %w", err)
-	}
-	m.treeMap[treeID] = tree
-
-	for _, data := range datas {
-		key := fmt.Sprintf("%s|%s", issuerDID, utils.Hash(data))
-		m.leafMap[key] = treeID
-	}
-
-	return nil
-}
-
-func (m *MerklesInMemory) GetProof(ctx context.Context, issuerDID string, data []byte) ([][]byte, error) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	key := fmt.Sprintf("%s|%s", issuerDID, utils.Hash(data))
-	treeID, exists := m.leafMap[key]
+	// Get the tree for the given issuer DID
+	tree, exists := m.treeMap[issuerDID]
 	if !exists {
-		return nil, fmt.Errorf("data not found in cache")
+		return nil
 	}
 
-	tree, exists := m.treeMap[treeID]
-	if !exists {
-		return nil, fmt.Errorf("tree with ID %d does not exist in cache", treeID)
+	// Check if the data exists in the tree
+	if !tree.Contains(data) {
+		return nil
 	}
 
-	proof, err := tree.GetProof(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get proof: %w", err)
-	}
-
-	return proof, nil
-}
-
-func (m *MerklesInMemory) GetRoot(ctx context.Context, issuerDID string, data []byte) ([]byte, error) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	key := fmt.Sprintf("%s|%s", issuerDID, utils.Hash(data))
-	treeID, exists := m.leafMap[key]
-	if !exists {
-		return nil, fmt.Errorf("data not found in cache")
-	}
-
-	tree, exists := m.treeMap[treeID]
-	if !exists {
-		return nil, fmt.Errorf("tree with ID %d does not exist in cache", treeID)
-	}
-
-	return tree.GetMerkleRoot(), nil
+	return tree
 }

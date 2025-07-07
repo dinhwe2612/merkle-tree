@@ -15,16 +15,14 @@ type MerkleTree struct {
 	leafMap    map[string]int
 	numLeafs   int
 	maxLeafs   int
+	treeID     int
 }
 
-func NewMerkleTree(datas [][]byte) (*MerkleTree, error) {
-	if len(datas) == 0 {
-		return nil, nil
-	}
-
+func NewMerkleTree(datas [][]byte, treeID int) (*MerkleTree, error) {
 	tree := &MerkleTree{}
 	tree.Init(utils.MAX_LEAFS)
 	tree.build(datas)
+	tree.treeID = treeID
 
 	return tree, nil
 }
@@ -40,7 +38,8 @@ func (tree *MerkleTree) Init(maxLeafs int) {
 
 func (tree *MerkleTree) build(datas [][]byte) error {
 	if len(datas) == 0 {
-		return fmt.Errorf("no datas provided to build the Merkle Tree")
+		// No data to build the tree
+		return nil
 	}
 
 	// build leaf map
@@ -182,4 +181,26 @@ func Verify(proof [][]byte, root []byte, data []byte) bool {
 	}
 
 	return bytes.Equal(currentHash, root)
+}
+
+func (tree *MerkleTree) GetTreeID() int {
+	return tree.treeID
+}
+
+func (tree *MerkleTree) GetLastNodeID() (int, error) {
+	if tree.numLeafs == 0 {
+		return 0, fmt.Errorf("no nodes in the tree")
+	}
+
+	return tree.numLeafs, nil
+}
+
+func (tree *MerkleTree) Contains(data []byte) bool {
+	hash := utils.Hash(data)
+	_, exists := tree.leafMap[hash]
+	return exists
+}
+
+func (tree *MerkleTree) IsFull() bool {
+	return len(tree.leafMap) >= tree.maxLeafs
 }
