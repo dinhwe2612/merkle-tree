@@ -170,14 +170,21 @@ func (m *MerklePostgres) AddNodeAndIncrementNodeCount(ctx context.Context, treeI
 }
 
 func (m *MerklePostgres) GetTreesWithNodesForSync(ctx context.Context) ([]*model.MerkleTreeWithNodes, error) {
+	// Query the trees and their nodes that need sync
 	rows, err := m.db.QueryContext(ctx, `
+	WITH updated AS (
+		UPDATE merkle_trees
+		SET need_sync = FALSE
+		WHERE need_sync = TRUE
+		RETURNING id
+	)
 	SELECT t.id, n.node_id, n.data
-	FROM merkle_trees t
+	FROM updated t
 	JOIN merkle_nodes n ON t.id = n.tree_id
-	WHERE t.need_sync = TRUE
-	ORDER BY t.id, n.node_id`)
+	ORDER BY t.id, n.node_id
+	`)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query trees with nodes for sync: %w", err)
+		return nil, fmt.Errorf("failed to query merkle trees and nodes: %w", err)
 	}
 	defer rows.Close()
 
