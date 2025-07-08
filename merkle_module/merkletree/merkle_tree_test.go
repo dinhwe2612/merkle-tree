@@ -145,7 +145,7 @@ func TestConcurrent(t *testing.T) {
 				channel <- result{idx, -1, nil}
 				return
 			}
-			channel <- result{idx, nodeID, hashData}
+			channel <- result{idx, nodeID, []byte(data)}
 			wg.Done()
 		}(i, data)
 	}
@@ -158,7 +158,8 @@ func TestConcurrent(t *testing.T) {
 			t.Errorf("Failed to add leaf for index %d", res.idx)
 			return
 		}
-		if !tree.Contains(res.data) {
+		hashData := utils.Hash(res.data)
+		if !tree.Contains(hashData) {
 			t.Errorf("Merkle Tree does not contain data for index %d: %s", res.idx, res.data)
 			return
 		}

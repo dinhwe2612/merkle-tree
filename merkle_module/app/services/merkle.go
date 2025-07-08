@@ -102,7 +102,8 @@ func (s *MerkleService) getActiveTree(ctx context.Context, issuerDID string) (*m
 	return tree, true
 }
 
-func (s *MerkleService) getActiveTreeForInserting(ctx context.Context, issuerDID string) (*merkletree.MerkleTree, error) {
+// helper function to get the active tree for inserting, return tree and boolean indicating if we need to load it from the database
+func (s *MerkleService) getActiveTreeForInserting(ctx context.Context, issuerDID string) (*merkletree.MerkleTree, bool, error) {
 	// Check if the active tree ID of the issuer DID is cached
 	tree, exists := s.getActiveTree(ctx, issuerDID)
 
@@ -110,38 +111,34 @@ func (s *MerkleService) getActiveTreeForInserting(ctx context.Context, issuerDID
 		// If not cached, get the active tree for inserting
 		activeTree, err := s.repo.GetActiveTreeForInserting(ctx, issuerDID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get active tree for inserting: %w", err)
+			return nil, true, fmt.Errorf("failed to get active tree for inserting: %w", err)
 		}
 
 		// Create a new Merkle tree
 		tree, err = merkletree.NewMerkleTree(activeTree.Nodes, activeTree.TreeID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create new merkle tree: %w", err)
+			return nil, true, fmt.Errorf("failed to create new merkle tree: %w", err)
 		}
 
 		s.cacheTrees.Add(tree.GetTreeID(), tree)
 		s.cacheActiveTreeIDs.Add(issuerDID, tree.GetTreeID())
 
-		return tree, nil
+		return tree, true, nil
 	}
 
-	return tree, nil
+	return tree, false, nil
 }
 
 func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error) {
 	mutex := getMutex(issuerDID)
 	mutex.Lock()
 
-	tree, err := s.getActiveTreeForInserting(ctx, issuerDID)
+	tree, needToLoad, err := s.getActiveTreeForInserting(ctx, issuerDID)
 	if err != nil {
 		mutex.Unlock()
 		return nil, fmt.Errorf("failed to get active tree for inserting: %w", err)
 	}
-	// Check if the tree is full
-	if tree.IsFull() {
-		mutex.Unlock()
-		return nil, fmt.Errorf("tree is full, cannot add more leaves")
-	}
+
 	// Add the leaf to the tree
 	nodeID := tree.AddLeaf(data)
 	if nodeID < 0 {
@@ -152,7 +149,12 @@ func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []by
 	mutex.Unlock()
 
 	// Add the node to the database
-	node, err := s.repo.AddNode(ctx, tree.GetTreeID(), nodeID, data)
+	var node *entities.MerkleNode
+	if needToLoad {
+		node, err = s.repo.AddNode(ctx, tree.GetTreeID(), nodeID, data)
+	} else {
+		node, err = s.repo.AddNodeAndIncrementNodeCount(ctx, tree.GetTreeID(), nodeID, data)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to add node: %w", err)
 	}

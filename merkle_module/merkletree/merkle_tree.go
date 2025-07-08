@@ -31,7 +31,7 @@ func (tree *MerkleTree) init(maxLeafs int) {
 		maxLeafs = utils.MAX_LEAFS
 	}
 	tree.maxLeafs = maxLeafs
-	tree.nodes = make([][]byte, tree.maxLeafs<<1)
+	tree.nodes = make([][]byte, tree.maxLeafs<<1+2)
 	tree.leafMap = make(map[string]int, tree.maxLeafs)
 }
 

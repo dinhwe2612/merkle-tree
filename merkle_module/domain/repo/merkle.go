@@ -15,4 +15,6 @@ type Merkle interface {
 	AddNode(ctx context.Context, treeID int, nodeID int, data []byte) (*entities.MerkleNode, error)
 	// Retrieve the active tree and reserve an empty node for inserting a new one
 	GetActiveTreeForInserting(ctx context.Context, issuerDID string) (*model.ActiveTree, error)
+	// Add a new node to the tree and increment the node count
+	AddNodeAndIncrementNodeCount(ctx context.Context, treeID int, nodeID int, data []byte) (*entities.MerkleNode, error)
 }

@@ -39,7 +39,7 @@ func main() {
 
 	ctx := context.Background()
 	issuerDID := "did:example:test_cli"
-	numLeaves := 200
+	numLeaves := 100
 	channel := make(chan result, numLeaves)
 	datas := make([][]byte, numLeaves)
 
@@ -114,6 +114,7 @@ func main() {
 
 	// CASE: Add duplicate data
 	log.Println("\n=== EDGE CASE 1: Add duplicate data ===")
+	issuerDID = "did:example:test_cli_dup"
 	dupData := randomBytes(32)
 	for i := 0; i < 5; i++ {
 		node, err := merkleService.AddLeaf(ctx, issuerDID, dupData)
@@ -126,6 +127,7 @@ func main() {
 
 	// CASE: Add MAX_LEAFS + 1 leaves to test tree full and new tree creation
 	log.Println("\n=== EDGE CASE 2: Add MAX_LEAFS + 1 leaves to test tree full and new tree creation ===")
+	issuerDID = "did:example:test_cli_max_leafs"
 	maxLeafs := utils.MAX_LEAFS
 	var lastTreeID, newTreeID int
 	for i := 0; i < maxLeafs+1; i++ {

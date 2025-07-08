@@ -128,7 +128,7 @@ func (m *MerklePostgres) GetActiveTreeForInserting(ctx context.Context, issuerDI
 	WHERE issuer_did = $1 AND node_count < $2 
 	FOR UPDATE
 	`, issuerDID, utils.MAX_LEAFS).Scan(&treeID, &nodeID)
-	fmt.Printf("Retrieved nodes for tree ID %d, node ID %d\n", treeID, nodeID)
+
 	if err == sql.ErrNoRows {
 		// If not found, create a new one with node_count = 1
 		err = tx.QueryRowContext(ctx, `
@@ -152,6 +152,8 @@ func (m *MerklePostgres) GetActiveTreeForInserting(ctx context.Context, issuerDI
 			return nil, fmt.Errorf("failed to update and return node_count: %w", err)
 		}
 	}
+
+	fmt.Printf("Retrieved nodes for tree ID %d, node ID %d\n", treeID, nodeID)
 
 	// Get the nodes for the active tree
 	rows, err := tx.QueryContext(ctx, `
@@ -178,5 +180,32 @@ func (m *MerklePostgres) GetActiveTreeForInserting(ctx context.Context, issuerDI
 		IssuerDID: issuerDID,
 		NodeCount: nodeID, // Already reserved a slot for the next node
 		Nodes:     nodes,
+	}, nil
+}
+
+func (m *MerklePostgres) AddNodeAndIncrementNodeCount(ctx context.Context, treeID int, nodeID int, data []byte) (*entities.MerkleNode, error) {
+	// Insert the new node into the database
+	_, err := m.db.ExecContext(ctx, `
+	INSERT INTO merkle_nodes (tree_id, node_id, data)
+	VALUES ($1, $2, $3)
+	`, treeID, nodeID, data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert merkle node: %w", err)
+	}
+
+	// Increment the node count for the tree with lock
+	_, err = m.db.ExecContext(ctx, `
+	UPDATE merkle_trees
+	SET node_count = node_count + 1
+	WHERE id = $1
+	`, treeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to increment node count: %w", err)
+	}
+
+	// Return the new node
+	return &entities.MerkleNode{
+		TreeID: treeID,
+		NodeID: nodeID,
 	}, nil
 }
