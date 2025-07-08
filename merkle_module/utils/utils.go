@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	MAX_LEAFS = 1 << 9
+	MAX_LEAFS = 1 << 7
 )
 
 func Hash(data []byte) []byte {

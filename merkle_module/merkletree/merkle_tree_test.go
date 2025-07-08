@@ -3,6 +3,7 @@ package merkletree
 import (
 	"fmt"
 	"merkle_module/utils"
+	"sync"
 	"testing"
 )
 
@@ -81,7 +82,7 @@ func TestMerkleTree(t *testing.T) {
 
 func TestStress(t *testing.T) {
 	// This test is designed to stress the Merkle Tree implementation
-	maxLeafs := 1 << 15 // 32768 leaves
+	maxLeafs := min(1<<15, utils.MAX_LEAFS) // 32768 leaves
 	tree, err := NewMerkleTree(nil, maxLeafs)
 	if err != nil {
 		t.Fatalf("Failed to create Merkle Tree: %v", err)
@@ -118,4 +119,57 @@ func TestStress(t *testing.T) {
 		}
 	}
 	fmt.Printf("Stress Test: All proofs verified successfully for %d leaves\n", maxLeafs)
+}
+
+func TestConcurrent(t *testing.T) {
+	// This test is designed to test the Merkle Tree implementation with concurrent access
+	tree, err := NewMerkleTree(nil, 0) // 0 is a placeholder for treeID, as we don't need it here
+	if err != nil {
+		t.Fatalf("Failed to create Merkle Tree: %v", err)
+	}
+	fmt.Printf("Concurrent Test: Created Merkle Tree with %d leaves\n", tree.maxLeafs)
+	type result struct {
+		idx    int
+		NodeID int
+		data   []byte
+	}
+	channel := make(chan result, tree.maxLeafs)
+	var wg sync.WaitGroup
+	wg.Add(tree.maxLeafs)
+	for i := 0; i < tree.maxLeafs; i++ {
+		data := fmt.Sprintf("data-%d", i)
+		go func(idx int, data string) {
+			hashData := utils.Hash([]byte(data))
+			nodeID := tree.AddLeaf(hashData)
+			if nodeID < 0 {
+				channel <- result{idx, -1, nil}
+				return
+			}
+			channel <- result{idx, nodeID, hashData}
+			wg.Done()
+		}(i, data)
+	}
+	// wait for all goroutines to finish
+	wg.Wait()
+
+	for i := 0; i < tree.maxLeafs; i++ {
+		res := <-channel
+		if res.NodeID < 0 {
+			t.Errorf("Failed to add leaf for index %d", res.idx)
+			return
+		}
+		if !tree.Contains(res.data) {
+			t.Errorf("Merkle Tree does not contain data for index %d: %s", res.idx, res.data)
+			return
+		}
+		proof, err := tree.GetProof(res.NodeID)
+		if err != nil {
+			t.Errorf("Failed to get proof for index %d: %v", res.idx, err)
+			return
+		}
+		if !utils.Verify(proof, tree.GetMerkleRoot(), res.data) {
+			t.Errorf("Proof verification failed for index %d: %s", res.idx, res.data)
+			return
+		}
+	}
 }

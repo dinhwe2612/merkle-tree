@@ -39,7 +39,7 @@ func main() {
 
 	ctx := context.Background()
 	issuerDID := "did:example:test_cli"
-	numLeaves := 100
+	numLeaves := 200
 	channel := make(chan result, numLeaves)
 	datas := make([][]byte, numLeaves)
 
@@ -71,6 +71,13 @@ func main() {
 		res := <-channel
 		if res.node == nil {
 			log.Println("Received nil node from channel")
+			addFailCount++
+			failCount++
+			continue
+		}
+		// check value in range [1, numLeaves]
+		if res.node.NodeID < 1 || res.node.NodeID > numLeaves {
+			log.Printf("Invalid NodeID: %d for index %d", res.node.NodeID, res.idx)
 			addFailCount++
 			failCount++
 			continue

@@ -14,20 +14,19 @@ type MerkleTree struct {
 	numLeafs int
 	maxLeafs int
 	treeID   int
-	mu sync.Mutex // mutex to ensure thread safety
-	    // mutex for thread safety
+	mu       sync.Mutex // mutex to ensure thread safety
 }
 
 func NewMerkleTree(datas [][]byte, treeID int) (*MerkleTree, error) {
 	tree := &MerkleTree{}
-	tree.Init(utils.MAX_LEAFS)
+	tree.init(utils.MAX_LEAFS)
 	tree.build(datas)
 	tree.treeID = treeID
 
 	return tree, nil
 }
 
-func (tree *MerkleTree) Init(maxLeafs int) {
+func (tree *MerkleTree) init(maxLeafs int) {
 	if maxLeafs <= 0 {
 		maxLeafs = utils.MAX_LEAFS
 	}
@@ -62,15 +61,16 @@ func (tree *MerkleTree) build(datas [][]byte) error {
 	return nil
 }
 
-func (tree *MerkleTree) AddLeaf(data []byte) {
+func (tree *MerkleTree) AddLeaf(data []byte) int {
 	tree.mu.Lock()
 	defer tree.mu.Unlock()
 	tree.numLeafs++
 	tree.leafMap[string(data)] = tree.numLeafs // store position starting from 1
-	tree.Update(data, tree.leafMap[string(data)])
+	tree.update(data, tree.leafMap[string(data)])
+	return tree.numLeafs
 }
 
-func (tree *MerkleTree) Update(data []byte, pos int) {
+func (tree *MerkleTree) update(data []byte, pos int) {
 	nodeID := tree.maxLeafs + pos - 1
 	tree.nodes[nodeID] = data
 
@@ -84,6 +84,9 @@ func (tree *MerkleTree) Update(data []byte, pos int) {
 }
 
 func (tree *MerkleTree) GetMerkleRoot() []byte {
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+
 	if len(tree.leafMap) == 0 {
 		return []byte{}
 	}
@@ -92,6 +95,9 @@ func (tree *MerkleTree) GetMerkleRoot() []byte {
 }
 
 func (tree *MerkleTree) GetProof(pos int) ([][]byte, error) {
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+
 	if pos <= 0 || pos > tree.numLeafs {
 		return nil, fmt.Errorf("invalid position: %d, must be between 1 and %d", pos, tree.numLeafs)
 	}
@@ -124,23 +130,26 @@ func (tree *MerkleTree) GetListNodesToSave() []int {
 	return nodesToSave
 }
 
-func (tree *MerkleTree) GetTreeID() int {
-	return tree.treeID
-}
+func (tree *MerkleTree) Contains(data []byte) bool {
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
 
-func (tree *MerkleTree) GetLastNodeID() (int, error) {
-	if tree.numLeafs == 0 {
-		return 0, fmt.Errorf("no nodes in the tree")
+	if len(tree.leafMap) == 0 {
+		return false
 	}
 
-	return tree.numLeafs, nil
-}
-
-func (tree *MerkleTree) Contains(data []byte) bool {
 	_, exists := tree.leafMap[string(data)]
 	return exists
 }
 
+func (tree *MerkleTree) GetTreeID() int {
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+	return tree.treeID
+}
+
 func (tree *MerkleTree) IsFull() bool {
-	return len(tree.leafMap) >= tree.maxLeafs
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+	return tree.numLeafs >= tree.maxLeafs
 }
