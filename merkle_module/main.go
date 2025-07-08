@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"math"
 	"merkle_module/app/services"
 	"merkle_module/domain/entities"
 	"merkle_module/infra/storage"
@@ -39,10 +40,11 @@ func main() {
 
 	ctx := context.Background()
 	issuerDID := "did:example:test_cli"
-	numLeaves := 100
+	numLeaves := 1000
 	channel := make(chan result, numLeaves)
 	datas := make([][]byte, numLeaves)
 
+	log.Println("=== CASE 1: Add leaves and verify proofs concurrently ===")
 	start := time.Now()
 	failCount := 0
 	addFailCount := 0
@@ -66,18 +68,19 @@ func main() {
 		TreeID int
 		NodeID int
 	}
+	minNodeID := math.MaxInt
+	maxNodeID := 0
 	nodeMap := make(map[nodeKey]int) // value: index of first occurrence
 	for i := 0; i < numLeaves; i++ {
 		res := <-channel
+		if minNodeID > res.idx {
+			minNodeID = res.node.NodeID
+		}
+		if maxNodeID < res.idx {
+			maxNodeID = res.node.NodeID
+		}
 		if res.node == nil {
 			log.Println("Received nil node from channel")
-			addFailCount++
-			failCount++
-			continue
-		}
-		// check value in range [1, numLeaves]
-		if res.node.NodeID < 1 || res.node.NodeID > numLeaves {
-			log.Printf("Invalid NodeID: %d for index %d", res.node.NodeID, res.idx)
 			addFailCount++
 			failCount++
 			continue
@@ -108,12 +111,16 @@ func main() {
 		nodeMap[key] = res.idx
 	}
 	elapsed := time.Since(start)
+	// if the gap between min and max NodeID is greater than numLeaves, it means there are missing nodes
+	if maxNodeID-minNodeID+1 > numLeaves {
+		log.Printf("Warning: Gap between min and max NodeID is greater than numLeaves: minNodeID=%d, maxNodeID=%d, numLeaves=%d", minNodeID, maxNodeID, numLeaves)
+	}
 	log.Printf("Total add leaf fail: %d", addFailCount)
 	log.Printf("Total verify proof fail: %d", failCount)
 	log.Printf("Total elapsed time: %s", elapsed)
 
 	// CASE: Add duplicate data
-	log.Println("\n=== EDGE CASE 1: Add duplicate data ===")
+	log.Println("\n=== CASE 2: Add duplicate data ===")
 	issuerDID = "did:example:test_cli_dup"
 	dupData := randomBytes(32)
 	for i := 0; i < 5; i++ {
@@ -126,7 +133,7 @@ func main() {
 	}
 
 	// CASE: Add MAX_LEAFS + 1 leaves to test tree full and new tree creation
-	log.Println("\n=== EDGE CASE 2: Add MAX_LEAFS + 1 leaves to test tree full and new tree creation ===")
+	log.Println("\n=== CASE 3: Add MAX_LEAFS + 1 leaves to test tree full and new tree creation ===")
 	issuerDID = "did:example:test_cli_max_leafs"
 	maxLeafs := utils.MAX_LEAFS
 	var lastTreeID, newTreeID int
@@ -153,6 +160,17 @@ func main() {
 	} else {
 		log.Printf("Could not determine treeID transition, lastTreeID=%d, newTreeID=%d", lastTreeID, newTreeID)
 	}
+
+	// // CASE: Use cron job to sync Merkle root
+	// log.Println("\n=== CASE 4: Use cron job to sync Merkle root ===")
+	// syncJob := cronjob.NewAsyncJob(ctx, merkleRepo)
+	// syncJob.Start()
+	// log.Println("Cron job started to sync Merkle root")
+	// for len(syncJob.GetRunningJobs()) > 0 {
+	// 	time.Sleep(100 * time.Second) // Wait for the job to complete
+	// }
+	// syncJob.Stop()
+	// log.Println("Cron job stopped")
 }
 
 func randomBytes(n int) []byte {

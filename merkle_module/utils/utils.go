@@ -2,12 +2,13 @@ package utils
 
 import (
 	"bytes"
+	"merkle_module/domain/entities"
 
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
 const (
-	MAX_LEAFS = 1 << 7
+	MAX_LEAFS = 1 << 5
 )
 
 func Hash(data []byte) []byte {
@@ -37,4 +38,26 @@ func Verify(proof [][]byte, root []byte, data []byte) bool {
 	}
 
 	return bytes.Equal(currentHash, root)
+}
+
+func GetTreeIDs(trees []*entities.MerkleTree) []int {
+	ids := make([]int, len(trees))
+	for i, tree := range trees {
+		ids[i] = tree.ID
+	}
+	return ids
+}
+
+func NodesToBytes(nodes []*entities.MerkleNode) [][]byte {
+	data := make([][]byte, len(nodes))
+	for i, node := range nodes {
+		data[i] = node.Data
+	}
+	return data
+}
+
+func ToByte32(data []byte) [32]byte {
+	var byte32 [32]byte
+	copy(byte32[:], data)
+	return byte32
 }

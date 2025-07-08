@@ -90,11 +90,13 @@ func (s *MerkleService) getActiveTree(ctx context.Context, issuerDID string) (*m
 	// Get the tree from the cache
 	tree, err := s.getTree(ctx, activeTreeID)
 	if err != nil {
+		fmt.Printf("Active tree for issuer DID %s not found in cache\n", issuerDID)
 		return nil, false
 	}
 
 	// If the tree is full, remove it from the cache and return false
 	if tree.IsFull() {
+		fmt.Printf("Active tree %d for issuer DID %s is full, removing from cache...\n", tree.GetTreeID(), issuerDID)
 		s.cacheActiveTreeIDs.Remove(issuerDID)
 		return nil, false
 	}
@@ -108,6 +110,7 @@ func (s *MerkleService) getActiveTreeForInserting(ctx context.Context, issuerDID
 	tree, exists := s.getActiveTree(ctx, issuerDID)
 
 	if !exists {
+		fmt.Printf("Active tree for issuer DID %s not found in cache, loading from database...\n", issuerDID)
 		// If not cached, get the active tree for inserting
 		activeTree, err := s.repo.GetActiveTreeForInserting(ctx, issuerDID)
 		if err != nil {
@@ -146,8 +149,6 @@ func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []by
 		return nil, fmt.Errorf("failed to add leaf to tree: node ID is negative")
 	}
 
-	mutex.Unlock()
-
 	// Add the node to the database
 	var node *entities.MerkleNode
 	if needToLoad {
@@ -158,6 +159,8 @@ func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []by
 	if err != nil {
 		return nil, fmt.Errorf("failed to add node: %w", err)
 	}
+
+	mutex.Unlock()
 
 	return node, nil
 }
