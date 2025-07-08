@@ -67,18 +67,45 @@ func (j *SyncMerkleJob) getRootResults() ([]RootResult, error) {
 
 	var rootResults []RootResult
 	for _, tree := range results {
+		// check node ids must fill the range from 1 to NodeCount
+		if tree.Tree.NodeCount != len(tree.Nodes) {
+			log.Printf("Node count mismatch for Tree ID %d: expected %d, got %d", tree.Tree.ID, tree.Tree.NodeCount, len(tree.Nodes))
+			log.Printf("Skipping Tree ID %d due to invalid node IDs", tree.Tree.ID)
+			continue
+		}
+		nodeMap := make(map[int]bool)
+		flag := false
+		for _, node := range tree.Nodes {
+			if node.NodeID <= 0 || node.NodeID > tree.Tree.NodeCount {
+				log.Printf("Invalid node ID %d for Tree ID %d: must be between 1 and %d", node.NodeID, tree.Tree.ID, tree.Tree.NodeCount)
+				flag = true
+			}
+			if nodeMap[node.NodeID] {
+				log.Printf("Duplicate node ID %d found for Tree ID %d", node.NodeID, tree.Tree.ID)
+				flag = true
+			}
+			nodeMap[node.NodeID] = true
+		}
+		if flag {
+			log.Printf("Skipping Tree ID %d due to invalid node IDs", tree.Tree.ID)
+			continue
+		}
+
 		// build the Merkle tree
 		tree, err := merkletree.NewMerkleTree(utils.NodesToBytes(tree.Nodes), tree.Tree.ID)
 		if err != nil {
 			log.Printf("Error creating Merkle tree for Tree ID %d: %v", tree.GetTreeID(), err)
 			continue
 		}
+
 		// get the Merkle root
 		root := tree.GetMerkleRoot()
 		if root == nil {
 			log.Printf("Error getting Merkle root for Tree ID %d: root is nil", tree.GetTreeID())
 			continue
 		}
+
+		// append the result
 		rootResults = append(rootResults, RootResult{
 			Root:   root,
 			TreeID: tree.GetTreeID(),

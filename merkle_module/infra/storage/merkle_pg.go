@@ -8,8 +8,6 @@ import (
 	"merkle_module/domain/repo"
 	"merkle_module/infra/model"
 	"merkle_module/utils"
-
-	"github.com/lib/pq"
 )
 
 type MerklePostgres struct {
@@ -171,127 +169,56 @@ func (m *MerklePostgres) AddNodeAndIncrementNodeCount(ctx context.Context, treeI
 	}, nil
 }
 
-func (m *MerklePostgres) GetTreesForSyncRoot(ctx context.Context) ([]*entities.MerkleTree, error) {
-	// Begin a transaction
-	tx, err := m.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	rows, err := tx.QueryContext(ctx, `
-	SELECT id, issuer_did, node_count
-	FROM merkle_trees
-	WHERE need_sync = TRUE
-	FOR UPDATE
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query merkle trees for sync: %w", err)
-	}
-	defer rows.Close()
-
-	var trees []*entities.MerkleTree
-	for rows.Next() {
-		var tree entities.MerkleTree
-		if err := rows.Scan(&tree.ID, &tree.IssuerDID, &tree.NodeCount); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-		tree.NeedSync = true // Set need_sync to true for the trees being returned
-		trees = append(trees, &tree)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating over rows: %w", err)
-	}
-
-	// Update the need_sync status to false for the trees being returned
-	_, err = tx.ExecContext(ctx, `
-	UPDATE merkle_trees
-	SET need_sync = FALSE
-	WHERE id = ANY($1)
-	`, pq.Array(utils.GetTreeIDs(trees)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to update need_sync status: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return trees, nil
-}
-
-func (m *MerklePostgres) GetFirstNNodes(ctx context.Context, treeID int, n int) ([]*entities.MerkleNode, error) {
-	rows, err := m.db.QueryContext(ctx, `
-	SELECT node_id, data
-	FROM merkle_nodes
-	WHERE tree_id = $1
-	ORDER BY node_id
-	LIMIT $2
-	`, treeID, n)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query first n nodes: %w", err)
-	}
-	defer rows.Close()
-
-	var nodes []*entities.MerkleNode
-	for rows.Next() {
-		var node entities.MerkleNode
-		if err := rows.Scan(&node.NodeID, &node.Data); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-		node.TreeID = treeID // Set the tree ID for the node
-		nodes = append(nodes, &node)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating over rows: %w", err)
-	}
-
-	return nodes, nil
-}
-
 func (m *MerklePostgres) GetTreesWithNodesForSync(ctx context.Context) ([]*model.MerkleTreeWithNodes, error) {
-	trees, err := m.GetTreesForSyncRoot(ctx)
+	rows, err := m.db.QueryContext(ctx, `
+	SELECT t.id, n.node_id, n.data
+	FROM merkle_trees t
+	JOIN merkle_nodes n ON t.id = n.tree_id
+	WHERE t.need_sync = TRUE
+	ORDER BY t.id, n.node_id`)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query trees with nodes for sync: %w", err)
 	}
+	defer rows.Close()
 
+	var currentTreeID int
+	var currentTree *model.MerkleTreeWithNodes
 	var result []*model.MerkleTreeWithNodes
-
-	stmt, err := m.db.PrepareContext(ctx, `
-		SELECT id, node_id, data
-		FROM merkle_nodes
-		WHERE tree_id = $1
-		ORDER BY node_id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement for nodes: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, tree := range trees {
-		// Lấy tất cả node của tree này
-		rows, err := stmt.QueryContext(ctx, tree.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query nodes for tree %d: %w", tree.ID, err)
+	for rows.Next() {
+		var treeID, nodeID int
+		var nodeData []byte
+		if err := rows.Scan(&treeID, &nodeID, &nodeData); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-		var nodes []*entities.MerkleNode
-		for rows.Next() {
-			var node entities.MerkleNode
-			if err := rows.Scan(&node.ID, &node.NodeID, &node.Data); err != nil {
-				rows.Close()
-				return nil, fmt.Errorf("failed to scan node for tree %d: %w", tree.ID, err)
+
+		if currentTreeID != treeID {
+			if currentTree != nil {
+				result = append(result, currentTree)
 			}
-			node.TreeID = tree.ID
-			nodes = append(nodes, &node)
+			currentTreeID = treeID
+			currentTree = &model.MerkleTreeWithNodes{
+				Tree: &entities.MerkleTree{
+					ID:        treeID,
+					NodeCount: 0,
+				},
+				Nodes: []*entities.MerkleNode{},
+			}
 		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("error iterating nodes for tree %d: %w", tree.ID, err)
-		}
-		result = append(result, &model.MerkleTreeWithNodes{
-			Tree:  tree,
-			Nodes: nodes,
+		currentTree.Nodes = append(currentTree.Nodes, &entities.MerkleNode{
+			TreeID: treeID,
+			NodeID: nodeID,
+			Data:   nodeData,
 		})
+		currentTree.Tree.NodeCount++
 	}
+
+	if currentTree != nil {
+		result = append(result, currentTree)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating over rows: %w", err)
+	}
+
 	return result, nil
 }
