@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	_ "github.com/joho/godotenv/autoload" // Load environment variables from .env file
-	_ "github.com/lib/pq"                 // PostgreSQL driver
+	_ "github.com/joho/godotenv/autoload"
+	_ "github.com/lib/pq"
 )
 
 func main() {

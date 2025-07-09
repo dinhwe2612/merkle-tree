@@ -16,4 +16,6 @@ type Merkle interface {
 	AddNodeAndIncrementNodeCount(ctx context.Context, treeID int, nodeID int, data []byte) (*entities.MerkleNode, error)
 	// Get the nodes of trees that need to be synced
 	GetTreesWithNodesForSync(ctx context.Context) ([]*model.MerkleTreeWithNodes, error)
+	// Get the nodes synced by tree ID
+	GetNodesSyncedByTreeID(ctx context.Context, treeID int) ([]*entities.MerkleNode, error)
 }

@@ -7,6 +7,7 @@ import (
 	"merkle_module/domain/entities"
 	"merkle_module/domain/repo"
 	"merkle_module/merkletree"
+	"merkle_module/utils"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common/lru"
@@ -191,4 +192,48 @@ func (s *MerkleService) GetRoot(ctx context.Context, treeID int) ([]byte, error)
 	}
 
 	return tree.GetMerkleRoot(), nil
+}
+
+func (s *MerkleService) GetSyncedProof(ctx context.Context, treeID, nodeID int) ([][]byte, error) {
+	// Load the tree from the database
+	nodes, err := s.repo.GetNodesSyncedByTreeID(ctx, treeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes by tree ID: %w", err)
+	}
+
+	// Create a new Merkle tree
+	tree, err := merkletree.NewMerkleTree(utils.NodesToBytes(nodes), treeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create new merkle tree: %w", err)
+	}
+
+	// Get the proof for the node ID
+	proof, err := tree.GetProof(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proof: %w", err)
+	}
+
+	return proof, nil
+}
+
+func (s *MerkleService) GetSyncedRoot(ctx context.Context, treeID int) ([]byte, error) {
+	// Load the tree from the database
+	nodes, err := s.repo.GetNodesSyncedByTreeID(ctx, treeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get nodes by tree ID: %w", err)
+	}
+
+	// Create a new Merkle tree
+	tree, err := merkletree.NewMerkleTree(utils.NodesToBytes(nodes), treeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create new merkle tree: %w", err)
+	}
+
+	// Get the Merkle root
+	root := tree.GetMerkleRoot()
+	if root == nil {
+		return nil, fmt.Errorf("failed to get merkle root: root is nil")
+	}
+
+	return root, nil
 }

@@ -39,7 +39,7 @@ func main() {
 	// add data into the merkle tree 100 leaves every 2s
 	ctx := context.Background()
 	issuerDIDs := []string{
-		"did:example:test_cli",
+		"did:example:test_cli_1",
 		"did:example:test_cli_2",
 		"did:example:test_cli_3",
 	}

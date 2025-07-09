@@ -10,8 +10,8 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/common/lru"
-	_ "github.com/joho/godotenv/autoload" // Load environment variables from .env file
-	_ "github.com/lib/pq"                 // PostgreSQL driver
+	_ "github.com/joho/godotenv/autoload"
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -33,12 +33,17 @@ func main() {
 	issuerCache := lru.NewCache[string, int](10)
 	merkleService := services.NewMerkleService(merkleRepo, merkleCache, issuerCache)
 	ctx := context.Background()
-
-	root, err := merkleService.GetRoot(ctx, 406)
+	treeID := 227 // Change this
+	root, err := merkleService.GetSyncedRoot(ctx, treeID)
 	if err != nil {
 		log.Fatalf("Failed to get root: %v", err)
 	}
-	log.Printf("Merkle root: %x", root)
+	log.Printf("Merkle root synced: %x", root)
+	root_not_synced, err := merkleService.GetRoot(ctx, treeID)
+	if err != nil {
+		log.Fatalf("Failed to get root: %v", err)
+	}
+	log.Printf("Merkle root not synced: %x", root_not_synced)
 }
 
 func getEnv(key, fallback string) string {
