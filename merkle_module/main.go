@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"log"
 	"math"
@@ -176,7 +177,9 @@ func main() {
 func randomBytes(n int) []byte {
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = byte(i % 256)
+		if _, err := rand.Read(b[i : i+1]); err != nil {
+			log.Fatalf("Failed to generate random bytes: %v", err)
+		}
 	}
 	return b
 }

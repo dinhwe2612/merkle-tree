@@ -47,11 +47,14 @@ func (m *MerklePostgres) GetNodesByTreeID(ctx context.Context, treeID int) ([][]
 }
 
 func (m *MerklePostgres) AddNode(ctx context.Context, treeID int, nodeID int, data []byte) (*entities.MerkleNode, error) {
+	// make a copy of the data
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
 	// Insert the new node into the database
 	_, err := m.db.ExecContext(ctx, `
 	INSERT INTO merkle_nodes (tree_id, node_id, data)
 	VALUES ($1, $2, $3)
-	`, treeID, nodeID, data)
+	`, treeID, nodeID, dataCopy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert merkle node: %w", err)
 	}
@@ -60,6 +63,7 @@ func (m *MerklePostgres) AddNode(ctx context.Context, treeID int, nodeID int, da
 	return &entities.MerkleNode{
 		TreeID: treeID,
 		NodeID: nodeID,
+		Data:   dataCopy,
 	}, nil
 }
 

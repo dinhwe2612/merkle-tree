@@ -133,6 +133,9 @@ func (s *MerkleService) getActiveTreeForInserting(ctx context.Context, issuerDID
 }
 
 func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error) {
+	// make a copy of the data
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
 	mutex := getMutex(issuerDID)
 	mutex.Lock()
 
@@ -143,7 +146,7 @@ func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []by
 	}
 
 	// Add the leaf to the tree
-	nodeID := tree.AddLeaf(data)
+	nodeID := tree.AddLeaf(dataCopy)
 	if nodeID < 0 {
 		mutex.Unlock()
 		return nil, fmt.Errorf("failed to add leaf to tree: node ID is negative")
@@ -152,9 +155,9 @@ func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []by
 	// Add the node to the database
 	var node *entities.MerkleNode
 	if needToLoad {
-		node, err = s.repo.AddNode(ctx, tree.GetTreeID(), nodeID, data)
+		node, err = s.repo.AddNode(ctx, tree.GetTreeID(), nodeID, dataCopy)
 	} else {
-		node, err = s.repo.AddNodeAndIncrementNodeCount(ctx, tree.GetTreeID(), nodeID, data)
+		node, err = s.repo.AddNodeAndIncrementNodeCount(ctx, tree.GetTreeID(), nodeID, dataCopy)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to add node: %w", err)

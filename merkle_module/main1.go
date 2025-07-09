@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"log"
 	"merkle_module/app/services"
@@ -47,15 +48,19 @@ func main() {
 			for _, issuerDID := range issuerDIDs {
 				go func(issuerDID string) {
 					data := randomBytes(32)
-					node, err := merkleService.AddLeaf(ctx, issuerDID, data)
+					// make a copy of the data
+					dataCopy := make([]byte, len(data))
+					copy(dataCopy, data)
+					node, err := merkleService.AddLeaf(ctx, issuerDID, dataCopy)
 					if err != nil {
 						log.Printf("Error adding leaf: %v", err)
+						return
 					}
 					if node == nil {
 						log.Printf("Error: node is nil after adding leaf")
 						return
 					}
-					log.Printf("Added leaf %d", node.NodeID)
+					log.Printf("Added leaf for issuer %s", issuerDID)
 				}(issuerDID)
 			}
 		}
@@ -67,7 +72,9 @@ func main() {
 func randomBytes(n int) []byte {
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = byte(i % 256)
+		if _, err := rand.Read(b[i : i+1]); err != nil {
+			log.Fatalf("Failed to generate random bytes: %v", err)
+		}
 	}
 	return b
 }
