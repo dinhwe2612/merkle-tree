@@ -5,18 +5,23 @@ import (
 	"log"
 	"merkle_module/domain/repo"
 	"merkle_module/merkletree"
+	credential "merkle_module/smartcontract"
 	"merkle_module/utils"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type SyncMerkleJob struct {
-	ctx  context.Context
-	repo repo.Merkle
+	ctx      context.Context
+	repo     repo.Merkle
+	contract *credential.SmartContract
 }
 
-func NewSyncMerkleJob(ctx context.Context, repo repo.Merkle) *SyncMerkleJob {
+func NewSyncMerkleJob(ctx context.Context, repo repo.Merkle, contract *credential.SmartContract) *SyncMerkleJob {
 	return &SyncMerkleJob{
-		ctx:  ctx,
-		repo: repo,
+		ctx:      ctx,
+		repo:     repo,
+		contract: contract,
 	}
 }
 
@@ -46,17 +51,33 @@ func (j *SyncMerkleJob) Run() {
 	}
 
 	// Send to smart contract
-	// for _, result := range results {
-	// 	// Convert root to byte32
-	// 	root32 := utils.ToByte32(result.Root)
-	// 	if err != nil {
-	// 		log.Printf("Error converting root to byte32 for Tree ID %d: %v", result.TreeID, err)
-	// 		continue
-	// 	}
+	if j.contract == nil {
+		log.Println("Smart contract is not initialized, skipping sending Merkle roots")
+		return
+	}
+	var issuers []common.Address
+	var roots [][32]byte
+	var treeIDs []int
+	for _, result := range results {
+		// Convert the Merkle root to a 32-byte array
+		if len(result.Root) != 32 {
+			log.Printf("Invalid Merkle root length for Tree ID %d: expected 32 bytes, got %d bytes", result.TreeID, len(result.Root))
+			continue
+		}
+		var root [32]byte
+		copy(root[:], result.Root)
 
-	// 	// Send the Merkle root to the smart contract
-	// 	sendsmartcontract.SendRootToContract(root32)
-	// }
+		// Append the issuer address and root
+		issuers = append(issuers, common.HexToAddress("0xYourIssuerAddress"))
+		roots = append(roots, root)
+		treeIDs = append(treeIDs, result.TreeID)
+	}
+	if err := j.contract.SendRoot(issuers, treeIDs, roots); err != nil {
+		log.Printf("Error sending Merkle roots to smart contract: %v", err)
+		return
+	}
+
+	log.Println("Merkle roots successfully sent to smart contract")
 }
 
 func (j *SyncMerkleJob) getRootResults() ([]RootResult, error) {
@@ -111,5 +132,6 @@ func (j *SyncMerkleJob) getRootResults() ([]RootResult, error) {
 			TreeID: tree.GetTreeID(),
 		})
 	}
+
 	return rootResults, nil
 }

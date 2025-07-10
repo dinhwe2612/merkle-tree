@@ -1,2 +1,4 @@
 /openzeppelin/node_modules
 merkle_module/.env
+/merkle_module/smartcontract/build
+/merkle_module/smartcontract/node_modules
