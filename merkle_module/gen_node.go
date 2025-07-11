@@ -8,11 +8,9 @@ import (
 	"merkle_module/app/services"
 	"merkle_module/infra/storage"
 	"os"
+	"sync"
 	"time"
 
-	"merkle_module/merkletree"
-
-	"github.com/ethereum/go-ethereum/common/lru"
 	_ "github.com/joho/godotenv/autoload"
 	_ "github.com/lib/pq"
 )
@@ -32,9 +30,7 @@ func main() {
 	}
 
 	merkleRepo := storage.NewMerklePostgres(db)
-	merkleCache := lru.NewCache[int, *merkletree.MerkleTree](10)
-	issuerCache := lru.NewCache[string, int](10)
-	merkleService := services.NewMerkleService(merkleRepo, merkleCache, issuerCache)
+	merkleService := services.NewMerkleService(merkleRepo)
 
 	// add data into the merkle tree 100 leaves every 2s
 	ctx := context.Background()
@@ -43,8 +39,12 @@ func main() {
 		"did:example:test_cli_2",
 		"did:example:test_cli_3",
 	}
+	wait := sync.WaitGroup{}
+	log.Println("Starting to add leaves to the Merkle tree...")
+	MAX_ADD := 50
+	wait.Add(len(issuerDIDs) * MAX_ADD)
 	for {
-		for i := 0; i < 10000; i++ {
+		for i := 0; i < MAX_ADD; i++ {
 			for _, issuerDID := range issuerDIDs {
 				go func(issuerDID string) {
 					data := randomBytes(32)
@@ -60,13 +60,17 @@ func main() {
 						log.Printf("Error: node is nil after adding leaf")
 						return
 					}
-					log.Printf("Added leaf for issuer %s", issuerDID)
+					log.Printf("Added leaf for issuer %s with data %x", issuerDID, node.Data)
+					wait.Done()
 				}(issuerDID)
 			}
 		}
-		log.Println("Waiting for 2 seconds before adding more leaves...")
-		time.Sleep(2 * time.Second)
+		log.Println("Waiting for 10 seconds before adding more leaves...")
+		time.Sleep(10 * time.Second)
+		break
 	}
+	wait.Wait()
+	log.Println("All leaves added to the Merkle tree.")
 }
 
 func randomBytes(n int) []byte {

@@ -4,11 +4,13 @@ import (
 	"context"
 	"log"
 	"merkle_module/domain/repo"
-	"merkle_module/merkletree"
+	"merkle_module/infra/model"
 	credential "merkle_module/smartcontract"
 	"merkle_module/utils"
+	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
+	mt "github.com/txaty/go-merkletree"
 )
 
 type SyncMerkleJob struct {
@@ -26,8 +28,9 @@ func NewSyncMerkleJob(ctx context.Context, repo repo.Merkle, contract *credentia
 }
 
 type RootResult struct {
-	Root   []byte
-	TreeID int
+	Root          []byte
+	TreeID        int
+	IssuerAddress string
 }
 
 // Run executes the job to sync the Merkle root, implementing the Job interface.
@@ -68,7 +71,7 @@ func (j *SyncMerkleJob) Run() {
 		copy(root[:], result.Root)
 
 		// Append the issuer address and root
-		issuers = append(issuers, common.HexToAddress("0xYourIssuerAddress"))
+		issuers = append(issuers, common.HexToAddress(result.IssuerAddress))
 		roots = append(roots, root)
 		treeIDs = append(treeIDs, result.TreeID)
 	}
@@ -80,58 +83,68 @@ func (j *SyncMerkleJob) Run() {
 	log.Println("Merkle roots successfully sent to smart contract")
 }
 
-func (j *SyncMerkleJob) getRootResults() ([]RootResult, error) {
-	results, err := j.repo.GetTreesWithNodesForSync(j.ctx)
+func (j *SyncMerkleJob) getRootResults() ([]*RootResult, error) {
+	trees, err := j.repo.GetNodesToSync(j.ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var rootResults []RootResult
-	for _, tree := range results {
-		// check node ids must fill the range from 1 to NodeCount
-		if tree.Tree.NodeCount != len(tree.Nodes) {
-			log.Printf("Node count mismatch for Tree ID %d: expected %d, got %d", tree.Tree.ID, tree.Tree.NodeCount, len(tree.Nodes))
-			log.Printf("Skipping Tree ID %d due to invalid node IDs", tree.Tree.ID)
-			continue
-		}
-		nodeMap := make(map[int]bool)
-		flag := false
-		for _, node := range tree.Nodes {
-			if node.NodeID <= 0 || node.NodeID > tree.Tree.NodeCount {
-				log.Printf("Invalid node ID %d for Tree ID %d: must be between 1 and %d", node.NodeID, tree.Tree.ID, tree.Tree.NodeCount)
-				flag = true
-			}
-			if nodeMap[node.NodeID] {
-				log.Printf("Duplicate node ID %d found for Tree ID %d", node.NodeID, tree.Tree.ID)
-				flag = true
-			}
-			nodeMap[node.NodeID] = true
-		}
-		if flag {
-			log.Printf("Skipping Tree ID %d due to invalid node IDs", tree.Tree.ID)
-			continue
-		}
-
-		// build the Merkle tree
-		tree, err := merkletree.NewMerkleTree(utils.NodesToBytes(tree.Nodes), tree.Tree.ID)
+	var results []*RootResult
+	for _, treeWithNodes := range trees {
+		isValid, err := j.ValidateTree(treeWithNodes)
 		if err != nil {
-			log.Printf("Error creating Merkle tree for Tree ID %d: %v", tree.GetTreeID(), err)
+			log.Printf("Error validating tree ID %d: %v", treeWithNodes.Tree.ID, err)
 			continue
 		}
-
-		// get the Merkle root
-		root := tree.GetMerkleRoot()
-		if root == nil {
-			log.Printf("Error getting Merkle root for Tree ID %d: root is nil", tree.GetTreeID())
+		if !isValid {
+			log.Printf("Tree ID %d is not valid, skipping", treeWithNodes.Tree.ID)
 			continue
 		}
+		var root []byte
+		if len(treeWithNodes.Nodes) == 1 { // If there's only one node, use its data as the root
+			root = treeWithNodes.Nodes[0].Data
+		} else {
+			// Build the merkle tree
+			tree, err := mt.New(utils.GetTreeConfig(), utils.ToBlockDatas(treeWithNodes.Nodes))
+			if err != nil {
+				log.Printf("Error creating Merkle tree for Tree ID %d: %v", treeWithNodes.Tree.ID, err)
+				continue
+			}
+			if tree == nil {
+				log.Printf("Failed to create Merkle tree for Tree ID %d: tree is nil", treeWithNodes.Tree.ID)
+				continue
+			}
+			root = tree.Root
+		}
 
-		// append the result
-		rootResults = append(rootResults, RootResult{
-			Root:   root,
-			TreeID: tree.GetTreeID(),
+		// add the result
+		results = append(results, &RootResult{
+			Root:          root,
+			TreeID:        treeWithNodes.Tree.ID,
+			IssuerAddress: treeWithNodes.Tree.IssuerDID,
 		})
 	}
 
-	return rootResults, nil
+	return results, nil
+}
+
+func (j *SyncMerkleJob) ValidateTree(tree model.MerkleTreeWithNodes) (bool, error) {
+	// Check if the tree has nodes
+	if tree.Tree == nil || len(tree.Nodes) == 0 {
+		log.Printf("Tree ID %d has no nodes, skipping validation", tree.Tree.ID)
+		return false, nil
+	}
+
+	// check if nodes belong to the same tree
+	sort.Slice(tree.Nodes, func(i, j int) bool {
+		return tree.Nodes[i].NodeID < tree.Nodes[j].NodeID
+	})
+	for i := 1; i < len(tree.Nodes); i++ {
+		if tree.Nodes[i].TreeID != tree.Nodes[i-1].TreeID {
+			log.Printf("Nodes in tree ID %d do not belong to the same tree", tree.Tree.ID)
+			return false, nil
+		}
+	}
+
+	return true, nil
 }

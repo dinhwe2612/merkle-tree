@@ -27,7 +27,7 @@ func NewAsyncJob(ctx context.Context, repo repo.Merkle, smartContract *credentia
 func (aj *AsyncJob) Start() {
 	// Add a job to sync the Merkle root
 	syncMerkleJob := NewSyncMerkleJob(aj.ctx, aj.repo, aj.smartContract)
-	if err := aj.jobManager.AddJob("syncMerkleRoot", "@every 10s", syncMerkleJob); err != nil {
+	if err := aj.jobManager.AddJob("syncMerkleRoot", "@every 20s", syncMerkleJob); err != nil {
 		log.Printf("Failed to add syncMerkleRoot job: %v", err)
 	}
 

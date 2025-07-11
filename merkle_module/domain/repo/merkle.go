@@ -7,15 +7,8 @@ import (
 )
 
 type Merkle interface {
-	// Get all nodes belonging to a specific tree ID
-	GetNodesByTreeID(ctx context.Context, treeID int) ([][]byte, error)
-	AddNode(ctx context.Context, treeID int, nodeID int, data []byte) (*entities.MerkleNode, error)
-	// Retrieve the active tree and reserve an empty node for inserting a new one
-	GetActiveTreeForInserting(ctx context.Context, issuerDID string) (*model.ActiveTree, error)
-	// Add a new node to the tree and increment the node count
-	AddNodeAndIncrementNodeCount(ctx context.Context, treeID int, nodeID int, data []byte) (*entities.MerkleNode, error)
-	// Get the nodes of trees that need to be synced
-	GetTreesWithNodesForSync(ctx context.Context) ([]*model.MerkleTreeWithNodes, error)
-	// Get the nodes synced by tree ID
-	GetNodesSyncedByTreeID(ctx context.Context, treeID int) ([]*entities.MerkleNode, error)
+	AddNode(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error)
+	GetNodesToBuildTree(ctx context.Context, treeID int) ([][]byte, error)
+	// Get nodes of trees that need to be synced and index them by tree ID
+	GetNodesToSync(ctx context.Context) ([]model.MerkleTreeWithNodes, error)
 }

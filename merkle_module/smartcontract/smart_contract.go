@@ -3,13 +3,8 @@ package credential
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
-	"os"
-	"strings"
 
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -70,7 +65,7 @@ func NewSmartContract(client *ethclient.Client, contract *Credential, contractAd
 }
 
 func (sc *SmartContract) SendRoot(issuers []common.Address, treeIDs []int, roots [][32]byte) error {
-	// int to big.Int conversion for treeIDs
+	// Convert to big.Int
 	treeIDsBig := make([]*big.Int, len(treeIDs))
 	for i, id := range treeIDs {
 		treeIDsBig[i] = big.NewInt(int64(id))
@@ -100,38 +95,23 @@ func (sc *SmartContract) SendRoot(issuers []common.Address, treeIDs []int, roots
 }
 
 func (sc *SmartContract) Verify(ctx context.Context, from common.Address, issuer common.Address, treeIndex int, leaf [32]byte, proof [][32]byte) (bool, error) {
-	abiBytes, err := os.ReadFile("./smartcontract/build/NDACredential.abi")
-	if err != nil {
-		log.Fatalf("Failed to read ABI file: %v", err)
-	}
-	contractABI, err := abi.JSON(strings.NewReader(string(abiBytes)))
-	if err != nil {
-		log.Fatalf("Failed to parse contract ABI: %v", err)
+	if sc.contract == nil {
+		return false, fmt.Errorf("smart contract is not initialized")
 	}
 
-	var proofHash []common.Hash
-	for _, p := range proof {
-		proofHash = append(proofHash, common.BytesToHash(p[:]))
-	}
+	// Convert treeIndex to big.Int
+	treeIndexBig := big.NewInt(int64(treeIndex))
 
-	callData, err := contractABI.Pack("verifyVC", issuer, big.NewInt(int64(treeIndex)), leaf, proofHash)
+	// Call the Verify function on the smart contract
+	isVerified, err := sc.contract.VerifyVC(
+		&bind.CallOpts{Context: ctx},
+		issuer,
+		treeIndexBig,
+		leaf,
+		proof,
+	)
 	if err != nil {
-		log.Fatalf("Failed to pack data for contract call: %v", err)
-	}
-
-	result, err := sc.client.CallContract(context.Background(), ethereum.CallMsg{
-		From: sc.auth.From,
-		To:   &sc.contractAddress,
-		Data: callData,
-	}, nil)
-	if err != nil {
-		log.Fatalf("Failed to call contract: %v", err)
-	}
-
-	var isVerified bool
-	err = contractABI.UnpackIntoInterface(&isVerified, "verifyVC", result)
-	if err != nil {
-		log.Fatalf("Failed to unpack contract result: %v", err)
+		return false, fmt.Errorf("failed to verify on smart contract: %w", err)
 	}
 
 	return isVerified, nil

@@ -4,9 +4,11 @@ go 1.24.2
 
 require (
 	github.com/ethereum/go-ethereum v1.16.1
+	github.com/go-playground/locales v0.14.1
 	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/txaty/go-merkletree v0.2.2
 )
 
 require (
