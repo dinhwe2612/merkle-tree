@@ -41,7 +41,7 @@ func main() {
 	}
 	wait := sync.WaitGroup{}
 	log.Println("Starting to add leaves to the Merkle tree...")
-	MAX_ADD := 50
+	MAX_ADD := 100
 	wait.Add(len(issuerDIDs) * MAX_ADD)
 	for {
 		for i := 0; i < MAX_ADD; i++ {
@@ -51,16 +51,12 @@ func main() {
 					// make a copy of the data
 					dataCopy := make([]byte, len(data))
 					copy(dataCopy, data)
-					node, err := merkleService.AddLeaf(ctx, issuerDID, dataCopy)
+					err := merkleService.AddLeaf(ctx, issuerDID, dataCopy)
 					if err != nil {
 						log.Printf("Error adding leaf: %v", err)
 						return
 					}
-					if node == nil {
-						log.Printf("Error: node is nil after adding leaf")
-						return
-					}
-					log.Printf("Added leaf for issuer %s with data %x", issuerDID, node.Data)
+					log.Printf("Added leaf for issuer %s", issuerDID)
 					wait.Done()
 				}(issuerDID)
 			}

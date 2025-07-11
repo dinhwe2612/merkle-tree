@@ -2,20 +2,21 @@ package credential
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type SmartContract struct {
 	client          *ethclient.Client
 	contract        *Credential
-	auth            *bind.TransactOpts
 	contractAddress common.Address
+	privateKey      *ecdsa.PrivateKey
+	ctx             context.Context
 }
 
 func NewEthClient(url string) (*ethclient.Client, error) {
@@ -26,45 +27,42 @@ func NewEthClient(url string) (*ethclient.Client, error) {
 	return client, nil
 }
 
-func NewTransactOpts(client *ethclient.Client, privateKey string, chainID *big.Int) (*bind.TransactOpts, error) {
-	key, err := crypto.HexToECDSA(privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load private key: %w", err)
-	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(key, chainID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create transactor: %w", err)
-	}
-
-	nonce, err := client.PendingNonceAt(context.Background(), auth.From)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get nonce: %w", err)
-	}
-
-	gasPrice, err := client.SuggestGasPrice(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to suggest gas price: %w", err)
-	}
-
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = big.NewInt(0)      // no ether being sent
-	auth.GasLimit = uint64(3000000) // adjust as needed
-	auth.GasPrice = gasPrice
-
-	return auth, nil
-}
-
-func NewSmartContract(client *ethclient.Client, contract *Credential, contractAddress common.Address, auth *bind.TransactOpts) *SmartContract {
+func NewSmartContract(client *ethclient.Client, contract *Credential, contractAddress common.Address, privateKey *ecdsa.PrivateKey, ctx context.Context) *SmartContract {
 	return &SmartContract{
+		ctx:             ctx,
 		client:          client,
 		contract:        contract,
-		auth:            auth,
 		contractAddress: contractAddress,
+		privateKey:      privateKey,
 	}
 }
 
 func (sc *SmartContract) SendRoot(issuers []common.Address, treeIDs []int, roots [][32]byte) error {
+	chainID, err := sc.client.ChainID(sc.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain ID: %w", err)
+	}
+
+	auth, err := bind.NewKeyedTransactorWithChainID(sc.privateKey, chainID)
+	if err != nil {
+		return fmt.Errorf("failed to create transactor: %w", err)
+	}
+
+	nonce, err := sc.client.PendingNonceAt(sc.ctx, auth.From)
+	if err != nil {
+		return fmt.Errorf("failed to get nonce: %w", err)
+	}
+
+	gasPrice, err := sc.client.SuggestGasPrice(sc.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to suggest gas price: %w", err)
+	}
+
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = big.NewInt(0)      // no ether being sent
+	auth.GasLimit = uint64(3300000) // adjust as needed
+	auth.GasPrice = gasPrice
+
 	// Convert to big.Int
 	treeIDsBig := make([]*big.Int, len(treeIDs))
 	for i, id := range treeIDs {
@@ -73,7 +71,7 @@ func (sc *SmartContract) SendRoot(issuers []common.Address, treeIDs []int, roots
 
 	// Send the Merkle root to the smart contract
 	tx, err := sc.contract.BatchUpdateTreeRoots(
-		sc.auth,
+		auth,
 		issuers,
 		treeIDsBig,
 		roots,
@@ -84,7 +82,7 @@ func (sc *SmartContract) SendRoot(issuers []common.Address, treeIDs []int, roots
 	fmt.Printf("Transaction sent: %s\n", tx.Hash().Hex())
 
 	// Wait for the transaction to be mined
-	receipt, err := bind.WaitMined(context.Background(), sc.client, tx)
+	receipt, err := bind.WaitMined(sc.ctx, sc.client, tx)
 	if err != nil {
 		return fmt.Errorf("failed to wait for transaction to be mined: %w", err)
 	}
@@ -94,7 +92,7 @@ func (sc *SmartContract) SendRoot(issuers []common.Address, treeIDs []int, roots
 	return nil
 }
 
-func (sc *SmartContract) Verify(ctx context.Context, from common.Address, issuer common.Address, treeIndex int, leaf [32]byte, proof [][32]byte) (bool, error) {
+func (sc *SmartContract) Verify(ctx context.Context, issuer common.Address, treeIndex int, leaf [32]byte, proof [][32]byte) (bool, error) {
 	if sc.contract == nil {
 		return false, fmt.Errorf("smart contract is not initialized")
 	}

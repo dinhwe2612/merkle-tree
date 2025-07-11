@@ -1,16 +1,18 @@
 package entities
 
 type MerkleNode struct {
-	ID     int    `json:"id"`
-	TreeID int    `json:"tree_id"`
-	NodeID int    `json:"node_id"`
-	Data   []byte `json:"value"`
+	ID        int    `json:"id"`
+	TreeID    int    `json:"tree_id"`
+	NodeID    int    `json:"node_id"`
+	Data      []byte `json:"value"`
+	IssuerDID string `json:"issuer_did"`
 }
 
 type MerkleTree struct {
 	ID        int    `json:"id"`
 	IssuerDID string `json:"issuer_did"`
-	NeedSync  bool   `json:"need_sync"`
+	NodeCount int    `json:"node_count"`
+	TreeID    int    `json:"tree_id"`
 }
 
 func (node *MerkleNode) Serialize() ([]byte, error) {

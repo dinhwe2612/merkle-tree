@@ -2,12 +2,12 @@ package cronjob
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"merkle_module/domain/entities"
 	"merkle_module/domain/repo"
-	"merkle_module/infra/model"
 	credential "merkle_module/smartcontract"
 	"merkle_module/utils"
-	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	mt "github.com/txaty/go-merkletree"
@@ -50,7 +50,7 @@ func (j *SyncMerkleJob) Run() {
 
 	// Print the results
 	for _, result := range results {
-		log.Printf("Tree ID: %d, Merkle Root: %x", result.TreeID, result.Root)
+		log.Printf("Tree ID: %d, Issuer Address: %s, Merkle Root: %x", result.TreeID, result.IssuerAddress, result.Root)
 	}
 
 	// Send to smart contract
@@ -84,67 +84,103 @@ func (j *SyncMerkleJob) Run() {
 }
 
 func (j *SyncMerkleJob) getRootResults() ([]*RootResult, error) {
-	trees, err := j.repo.GetNodesToSync(j.ctx)
+	nodesOfIssuers, err := j.repo.GetNodesToSync(j.ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	// group nodes of issuerDID into trees following by utils.MAX_LEAFS
+	var updatedNodes []*entities.MerkleNode
 	var results []*RootResult
-	for _, treeWithNodes := range trees {
-		isValid, err := j.ValidateTree(treeWithNodes)
-		if err != nil {
-			log.Printf("Error validating tree ID %d: %v", treeWithNodes.Tree.ID, err)
+	var updatedTree []*entities.MerkleTree
+	for _, nodes := range nodesOfIssuers {
+		if len(nodes) == 0 {
 			continue
 		}
-		if !isValid {
-			log.Printf("Tree ID %d is not valid, skipping", treeWithNodes.Tree.ID)
-			continue
+		fmt.Printf("Processing %d nodes for issuer %s\n", len(nodes), nodes[0].IssuerDID)
+		// Index the nodeID and treeID again
+		currentTreeID := nodes[0].TreeID
+		if currentTreeID <= 0 {
+			currentTreeID = 1 // Start from tree ID 1 if not set
 		}
-		var root []byte
-		if len(treeWithNodes.Nodes) == 1 { // If there's only one node, use its data as the root
-			root = treeWithNodes.Nodes[0].Data
-		} else {
-			// Build the merkle tree
-			tree, err := mt.New(utils.GetTreeConfig(), utils.ToBlockDatas(treeWithNodes.Nodes))
-			if err != nil {
-				log.Printf("Error creating Merkle tree for Tree ID %d: %v", treeWithNodes.Tree.ID, err)
-				continue
+		var datas [][]byte
+		for _, node := range nodes {
+			if len(datas) >= utils.MAX_LEAFS {
+				// create a merkle tree from the current data
+				updatedTree = append(updatedTree, &entities.MerkleTree{
+					IssuerDID: node.IssuerDID,
+					NodeCount: len(datas),
+					TreeID:    currentTreeID,
+				})
+				root, err := j.getRoot(datas)
+				if err != nil {
+					return nil, err
+				}
+				results = append(results, &RootResult{
+					Root:          root,
+					TreeID:        currentTreeID,
+					IssuerAddress: node.IssuerDID,
+				})
+				// go to the next tree
+				currentTreeID++
+				datas = nil
 			}
-			if tree == nil {
-				log.Printf("Failed to create Merkle tree for Tree ID %d: tree is nil", treeWithNodes.Tree.ID)
-				continue
-			}
-			root = tree.Root
+			// Update the node with the new tree ID and node ID
+			node.TreeID = currentTreeID
+			node.NodeID = len(datas) + 1
+			updatedNodes = append(updatedNodes, node)
+			datas = append(datas, node.Data)
 		}
+		if len(datas) > 0 {
+			// create a merkle tree from the remaining data
+			updatedTree = append(updatedTree, &entities.MerkleTree{
+				IssuerDID: nodes[0].IssuerDID,
+				NodeCount: len(datas),
+				TreeID:    currentTreeID,
+			})
 
-		// add the result
-		results = append(results, &RootResult{
-			Root:          root,
-			TreeID:        treeWithNodes.Tree.ID,
-			IssuerAddress: treeWithNodes.Tree.IssuerDID,
-		})
+			// Get the Merkle root for the current tree
+			root, err := j.getRoot(datas)
+			if err != nil {
+				return nil, err
+			}
+
+			results = append(results, &RootResult{
+				Root:          root,
+				TreeID:        currentTreeID,
+				IssuerAddress: nodes[0].IssuerDID,
+			})
+		}
+	}
+
+	// Update the nodes in the database
+	if err := j.repo.UpdateNodes(j.ctx, updatedNodes); err != nil {
+		return nil, err
+	}
+
+	// Update the trees
+	if err := j.repo.UpdateTrees(j.ctx, updatedTree); err != nil {
+		return nil, err
 	}
 
 	return results, nil
 }
 
-func (j *SyncMerkleJob) ValidateTree(tree model.MerkleTreeWithNodes) (bool, error) {
-	// Check if the tree has nodes
-	if tree.Tree == nil || len(tree.Nodes) == 0 {
-		log.Printf("Tree ID %d has no nodes, skipping validation", tree.Tree.ID)
-		return false, nil
+func (j *SyncMerkleJob) getRoot(datas [][]byte) ([]byte, error) {
+	if len(datas) == 0 {
+		return nil, fmt.Errorf("no data provided to create Merkle root")
 	}
 
-	// check if nodes belong to the same tree
-	sort.Slice(tree.Nodes, func(i, j int) bool {
-		return tree.Nodes[i].NodeID < tree.Nodes[j].NodeID
-	})
-	for i := 1; i < len(tree.Nodes); i++ {
-		if tree.Nodes[i].TreeID != tree.Nodes[i-1].TreeID {
-			log.Printf("Nodes in tree ID %d do not belong to the same tree", tree.Tree.ID)
-			return false, nil
-		}
+	if len(datas) == 1 {
+		return datas[0], nil
 	}
 
-	return true, nil
+	// Create a Merkle tree from the data
+	tree, err := mt.New(utils.GetTreeConfig(), utils.ToBlockDataFromByteArray(datas))
+	if err != nil {
+		return nil, err
+	}
+
+	// Return the Merkle root
+	return tree.Root, nil
 }

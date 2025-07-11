@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	_ "github.com/joho/godotenv/autoload"
 	_ "github.com/lib/pq"
@@ -28,17 +29,13 @@ func main() {
 		log.Fatalf("Failed to instantiate contract: %v", err)
 	}
 
-	chainID, err := ethClient.ChainID(context.Background())
+	privateKey := getEnv("ACCOUNT_PRIVATE_KEY", "")
+	key, err := crypto.HexToECDSA(privateKey)
 	if err != nil {
-		log.Fatalf("Failed to get chain ID: %v", err)
+		log.Fatalf("Failed to parse private key: %v", err)
 	}
 
-	auth, err := credential.NewTransactOpts(ethClient, getEnv("ACCOUNT_PRIVATE_KEY", ""), chainID)
-	if err != nil {
-		log.Fatalf("Failed to create transaction options: %v", err)
-	}
-
-	smartContract := credential.NewSmartContract(ethClient, contract, contractAddress, auth)
+	smartContract := credential.NewSmartContract(ethClient, contract, contractAddress, key, context.Background())
 	// Load environment variables
 	connStr := getEnv("DATABASE_URL", "postgres://user:password@localhost:port/merkle_tree?sslmode=disable")
 	// Connect to the database

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"merkle_module/app/interfaces"
-	"merkle_module/domain/entities"
 	"merkle_module/domain/repo"
 	"merkle_module/utils"
 
@@ -19,40 +18,18 @@ func NewMerkleService(repo repo.Merkle) interfaces.Merkle {
 	return &MerkleService{repo: repo}
 }
 
-func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) (*entities.MerkleNode, error) {
-	node, err := s.repo.AddNode(ctx, issuerDID, data)
+func (s *MerkleService) AddLeaf(ctx context.Context, issuerDID string, data []byte) error {
+	err := s.repo.AddNode(ctx, issuerDID, data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to add node: %w", err)
+		return fmt.Errorf("failed to add node: %w", err)
 	}
-	return node, nil
+	return nil
 }
 
-func (s *MerkleService) GetProof(ctx context.Context, treeID int, data []byte) ([][]byte, error) {
-	// Get the tree by tree ID
-	tree, err := s.getTree(ctx, treeID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tree: %w", err)
-	}
+func (s *MerkleService) GetProof(ctx context.Context, data []byte) ([][]byte, error) {
+	// Get tree ID of the data
+	treeID, err := s.repo.GetTreeIDByData(ctx, data)
 
-	proof, err := tree.Proof(utils.ToBlockData(data))
-	if err != nil {
-		return nil, fmt.Errorf("failed to get proof: %w", err)
-	}
-
-	return proof.Siblings, nil
-}
-
-func (s *MerkleService) GetRoot(ctx context.Context, treeID int) ([]byte, error) {
-	// Get the tree by tree ID
-	tree, err := s.getTree(ctx, treeID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tree: %w", err)
-	}
-
-	return tree.Root, nil
-}
-
-func (s *MerkleService) getTree(ctx context.Context, treeID int) (*mt.MerkleTree, error) {
 	// Load node from database
 	nodes, err := s.repo.GetNodesToBuildTree(ctx, treeID)
 	if err != nil {
@@ -61,6 +38,11 @@ func (s *MerkleService) getTree(ctx context.Context, treeID int) (*mt.MerkleTree
 
 	if len(nodes) == 0 {
 		return nil, fmt.Errorf("no nodes found for tree ID %d", treeID)
+	}
+
+	if len(nodes) == 1 {
+		// If there's only one node, return an empty proof
+		return [][]byte{}, nil
 	}
 
 	// Build the Merkle tree
@@ -73,5 +55,10 @@ func (s *MerkleService) getTree(ctx context.Context, treeID int) (*mt.MerkleTree
 		return nil, fmt.Errorf("failed to create Merkle tree: tree is nil")
 	}
 
-	return tree, nil
+	proof, err := tree.Proof(utils.ToBlockData(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proof: %w", err)
+	}
+
+	return proof.Siblings, nil
 }

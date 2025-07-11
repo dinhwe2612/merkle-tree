@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	_ "github.com/joho/godotenv/autoload" // Automatically load .env file
 	mt "github.com/txaty/go-merkletree"
@@ -26,15 +27,12 @@ func main() {
 		log.Fatalf("Failed to instantiate contract: %v", err)
 	}
 
-	chainID, err := ethClient.ChainID(context.Background())
+	privateKey := getEnv("ACCOUNT_PRIVATE_KEY", "")
+	key, err := crypto.HexToECDSA(privateKey)
 	if err != nil {
-		log.Fatalf("Failed to get chain ID: %v", err)
+		log.Fatalf("Failed to parse private key: %v", err)
 	}
-	auth, err := credential.NewTransactOpts(ethClient, getEnv("ACCOUNT_PRIVATE_KEY", ""), chainID)
-	if err != nil {
-		log.Fatalf("Failed to create transaction options: %v", err)
-	}
-	smartContract := credential.NewSmartContract(ethClient, contract, contractAddress, auth)
+	smartContract := credential.NewSmartContract(ethClient, contract, contractAddress, key, context.Background())
 
 	// 1. Sinh dữ liệu ngẫu nhiên
 	var leaves [][]byte
@@ -87,7 +85,6 @@ func main() {
 	log.Println("Verifying on smart contract...")
 	isVerified, err := smartContract.Verify(
 		context.Background(),
-		issuers[0],
 		issuers[0],
 		treeIDs[0],
 		leaf32,

@@ -98,5 +98,6 @@ func GetTreeConfig() *mt.Config {
 		SortSiblingPairs:   true,
 		RunInParallel:      true,
 		DisableLeafHashing: true,
+		Mode:               mt.ModeProofGenAndTreeBuild,
 	}
 }
